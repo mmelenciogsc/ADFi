@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../ADFi.Core/ADFi.Core.csproj" />
+    <ProjectReference Include="../ADFi.Economics/ADFi.Economics.csproj" />
+  </ItemGroup>
+</Project>
+

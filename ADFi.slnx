@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ADFi.Api/ADFi.Api.csproj" />
+    <Project Path="src/ADFi.Conversation/ADFi.Conversation.csproj" />
+    <Project Path="src/ADFi.Core/ADFi.Core.csproj" />
+    <Project Path="src/ADFi.Desktop/ADFi.Desktop.csproj" />
+    <Project Path="src/ADFi.Economics/ADFi.Economics.csproj" />
+    <Project Path="src/ADFi.Infrastructure/ADFi.Infrastructure.csproj" />
+    <Project Path="src/ADFi.LocalAI/ADFi.LocalAI.csproj" />
+    <Project Path="src/ADFi.Media/ADFi.Media.csproj" />
+    <Project Path="src/ADFi.Web/ADFi.Web.csproj" />
+    <Project Path="src/ADFi.YouTube/ADFi.YouTube.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ADFi.Architecture.Tests/ADFi.Architecture.Tests.csproj" />
+    <Project Path="tests/ADFi.Core.Tests/ADFi.Core.Tests.csproj" />
+  </Folder>
+</Solution>
+

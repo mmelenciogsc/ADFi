@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/ADFi.Conversation/ADFi.Conversation.csproj" />
+    <ProjectReference Include="../../src/ADFi.Core/ADFi.Core.csproj" />
+    <ProjectReference Include="../../src/ADFi.Economics/ADFi.Economics.csproj" />
+    <ProjectReference Include="../../src/ADFi.LocalAI/ADFi.LocalAI.csproj" />
+    <ProjectReference Include="../../src/ADFi.Media/ADFi.Media.csproj" />
+  </ItemGroup>
+</Project>

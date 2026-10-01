@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../ADFi.Conversation/ADFi.Conversation.csproj" />
+    <ProjectReference Include="../ADFi.Core/ADFi.Core.csproj" />
+    <ProjectReference Include="../ADFi.Infrastructure/ADFi.Infrastructure.csproj" />
+    <ProjectReference Include="../ADFi.LocalAI/ADFi.LocalAI.csproj" />
+    <ProjectReference Include="../ADFi.Media/ADFi.Media.csproj" />
+    <ProjectReference Include="../ADFi.YouTube/ADFi.YouTube.csproj" />
+  </ItemGroup>
+</Project>
+
