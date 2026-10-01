@@ -38,6 +38,7 @@ runuser -u adfi --preserve-environment -- /usr/bin/dotnet "${release_directory}/
 previous_release="$(readlink -f /opt/adfi/current 2>/dev/null || true)"
 ln -sfn "${release_directory}" /opt/adfi/current
 systemctl daemon-reload
+systemctl enable adfi-api.service
 systemctl restart adfi-api.service
 ready=false
 for _ in {1..15}; do
