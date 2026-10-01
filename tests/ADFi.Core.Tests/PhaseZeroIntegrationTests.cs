@@ -54,6 +54,15 @@ public sealed class PhaseZeroIntegrationTests
                     chunk.RelativeAudioPath.Replace('/', Path.DirectorySeparatorChar)))));
             Assert.True(File.Exists(Path.Combine(projectPath, "manifests", "audio-prepared.json")));
             Assert.Equal(before, await File.ReadAllBytesAsync(sourcePath, cancellationToken));
+
+            var frameCandidates = await OpenCvVisualPreprocessor.AnalyzeCandidatesAsync(
+                sourcePath,
+                TimeSpan.FromMilliseconds(250),
+                maximumDimension: 320,
+                cancellationToken);
+            Assert.NotEmpty(frameCandidates);
+            Assert.Equal(TimeSpan.Zero, frameCandidates[0].SourceTime);
+            Assert.True(frameCandidates.Count <= 5);
         }
         finally
         {

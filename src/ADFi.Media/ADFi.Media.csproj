@@ -5,5 +5,8 @@
   <ItemGroup>
     <ProjectReference Include="../ADFi.Core/ADFi.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260627" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260627" />
+  </ItemGroup>
 </Project>
-
