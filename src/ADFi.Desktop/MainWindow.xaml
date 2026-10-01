@@ -2,11 +2,13 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="ADFi"
-        Width="1100"
-        Height="760"
-        MinWidth="760"
-        MinHeight="560"
+        Width="1160"
+        Height="820"
+        MinWidth="800"
+        MinHeight="600"
         WindowStartupLocation="CenterScreen"
+        Loaded="MainWindow_OnLoaded"
+        Closed="MainWindow_OnClosed"
         AutomationProperties.Name="ADFi accessible media application">
     <DockPanel Margin="16">
         <TextBlock DockPanel.Dock="Top"
@@ -18,7 +20,8 @@
 
         <StatusBar DockPanel.Dock="Bottom" Margin="0,12,0,0">
             <TextBlock x:Name="StatusText"
-                       Text="Ready. DISCOVER is available without signing in."
+                       Text="Starting ADFi."
+                       TextWrapping="Wrap"
                        AutomationProperties.Name="Application status"
                        AutomationProperties.LiveSetting="Polite" />
         </StatusBar>
@@ -29,55 +32,225 @@
                     SelectionChanged="PrimaryNavigation_OnSelectionChanged">
             <TabItem Header="_MY ADFi" AutomationProperties.Name="MY ADFi">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
-                    <StackPanel Margin="16" MaxWidth="900" HorizontalAlignment="Left">
+                    <StackPanel Margin="16" MaxWidth="960" HorizontalAlignment="Left">
                         <TextBlock Text="MY ADFi"
                                    FontSize="24"
                                    FontWeight="SemiBold"
                                    AutomationProperties.HeadingLevel="Level1" />
                         <TextBlock Margin="0,4,0,16"
                                    TextWrapping="Wrap"
-                                   Text="Sign in to manage your private account, playlists, projects, drafts, collaborations, connected services, referrals, and earnings." />
+                                   Text="Your private account, subscriptions, local projects, review tools, connected services, referrals, and earnings." />
 
                         <GroupBox Header="Account" Margin="0,0,0,12">
                             <StackPanel Margin="8">
-                                <TextBlock Text="Not signed in" FontWeight="SemiBold" />
-                                <Button Content="_Sign in" AutomationProperties.Name="Sign in to MY ADFi" HorizontalAlignment="Left" />
+                                <TextBlock x:Name="AccountStateText"
+                                           Text="Not signed in."
+                                           FontWeight="SemiBold"
+                                           TextWrapping="Wrap"
+                                           AutomationProperties.Name="Account state" />
+
+                                <StackPanel x:Name="SignedOutPanel" Margin="0,8,0,0">
+                                    <Label Target="{Binding ElementName=EmailTextBox}" Content="_Email address" />
+                                    <TextBox x:Name="EmailTextBox"
+                                             TabIndex="1"
+                                             AutomationProperties.Name="Email address"
+                                             AutomationProperties.HelpText="Enter the verified email address for your ADFi account." />
+                                    <Label Target="{Binding ElementName=PasswordInput}" Content="_Password" />
+                                    <PasswordBox x:Name="PasswordInput"
+                                                 MinHeight="32"
+                                                 Margin="4"
+                                                 TabIndex="2"
+                                                 AutomationProperties.Name="Password"
+                                                 AutomationProperties.HelpText="Your password is sent only to the configured ADFi server over HTTPS and is never stored by this app." />
+                                    <WrapPanel>
+                                        <Button x:Name="SignInButton"
+                                                Content="_Sign in"
+                                                TabIndex="3"
+                                                IsDefault="True"
+                                                Click="SignInButton_OnClick"
+                                                AutomationProperties.Name="Sign in to MY ADFi" />
+                                        <Button Content="Request password _reset"
+                                                TabIndex="4"
+                                                Click="PasswordResetButton_OnClick"
+                                                AutomationProperties.Name="Request a password reset email" />
+                                    </WrapPanel>
+
+                                    <Expander Header="Create an ADFi account"
+                                              Margin="4,8,4,0"
+                                              AutomationProperties.Name="Create an ADFi account">
+                                        <StackPanel Margin="8">
+                                            <Label Target="{Binding ElementName=RegistrationNameTextBox}" Content="Display _name" />
+                                            <TextBox x:Name="RegistrationNameTextBox"
+                                                     TabIndex="5"
+                                                     AutomationProperties.Name="New account display name" />
+                                            <Label Target="{Binding ElementName=RegistrationEmailTextBox}" Content="E_mail address" />
+                                            <TextBox x:Name="RegistrationEmailTextBox"
+                                                     TabIndex="6"
+                                                     AutomationProperties.Name="New account email address" />
+                                            <Label Target="{Binding ElementName=RegistrationPasswordInput}" Content="New _password" />
+                                            <PasswordBox x:Name="RegistrationPasswordInput"
+                                                         MinHeight="32"
+                                                         Margin="4"
+                                                         TabIndex="7"
+                                                         AutomationProperties.Name="New account password" />
+                                            <Label Target="{Binding ElementName=RegistrationPasswordConfirmationInput}" Content="_Confirm password" />
+                                            <PasswordBox x:Name="RegistrationPasswordConfirmationInput"
+                                                         MinHeight="32"
+                                                         Margin="4"
+                                                         TabIndex="8"
+                                                         AutomationProperties.Name="Confirm new account password" />
+                                            <Button Content="_Create account"
+                                                    TabIndex="9"
+                                                    HorizontalAlignment="Left"
+                                                    Click="RegisterButton_OnClick"
+                                                    AutomationProperties.Name="Create ADFi account" />
+                                        </StackPanel>
+                                    </Expander>
+                                </StackPanel>
+
+                                <StackPanel x:Name="SignedInPanel" Visibility="Collapsed" Margin="0,8,0,0">
+                                    <TextBlock x:Name="SubscriptionStateText"
+                                               Text="Subscription access has not been verified."
+                                               TextWrapping="Wrap"
+                                               AutomationProperties.Name="Subscription state" />
+                                    <WrapPanel>
+                                        <Button Content="_Refresh access"
+                                                TabIndex="10"
+                                                Click="RefreshEntitlementButton_OnClick"
+                                                AutomationProperties.Name="Refresh subscription access" />
+                                        <Button Content="Sign _out"
+                                                TabIndex="11"
+                                                Click="SignOutButton_OnClick"
+                                                AutomationProperties.Name="Sign out of MY ADFi" />
+                                    </WrapPanel>
+                                </StackPanel>
                             </StackPanel>
                         </GroupBox>
 
                         <GroupBox Header="Creator tools" Margin="0,0,0,12">
                             <StackPanel Margin="8">
                                 <TextBlock TextWrapping="Wrap"
-                                           Text="A Creator subscription is required to create or conversationally edit an ADFied work." />
+                                           Text="A current server-verified Creator subscription is required. Source intake accepts supported local video files only." />
                                 <CheckBox x:Name="RightsAttestationCheckBox"
                                           Margin="4,12"
+                                          TabIndex="12"
                                           Content="I confirm that I own this media or have all rights/authorization necessary to process, modify and publish this ADFied version."
                                           AutomationProperties.Name="Rights and authorization confirmation"
-                                          AutomationProperties.HelpText="Required before selecting a local source video. This confirmation is recorded but is not independent proof of ownership." />
+                                          AutomationProperties.HelpText="Required before selecting a local source video. This confirmation is recorded but is not independent proof of ownership."
+                                          Checked="RightsAttestationCheckBox_OnChanged"
+                                          Unchecked="RightsAttestationCheckBox_OnChanged" />
                                 <WrapPanel>
-                                    <Button Content="Select _local video"
+                                    <Button x:Name="SelectLocalVideoButton"
+                                            Content="Select _local video"
+                                            TabIndex="13"
                                             IsEnabled="False"
+                                            Click="SelectLocalVideoButton_OnClick"
                                             AutomationProperties.Name="Select local source video"
-                                            AutomationProperties.HelpText="Available to signed-in Creator subscribers after rights confirmation." />
-                                    <Button Content="_Resume project"
+                                            AutomationProperties.HelpText="Available after a current Creator entitlement is verified and rights confirmation is checked." />
+                                    <Button x:Name="CancelOperationButton"
+                                            Content="_Cancel current operation"
+                                            TabIndex="14"
                                             IsEnabled="False"
-                                            AutomationProperties.Name="Resume an ADFication project" />
+                                            Click="CancelOperationButton_OnClick"
+                                            AutomationProperties.Name="Cancel current local processing operation" />
+                                </WrapPanel>
+
+                                <TextBlock Text="Local projects"
+                                           Margin="4,12,4,4"
+                                           FontSize="17"
+                                           FontWeight="SemiBold"
+                                           AutomationProperties.HeadingLevel="Level2" />
+                                <ListBox x:Name="LocalProjectsList"
+                                         MinHeight="90"
+                                         MaxHeight="210"
+                                         TabIndex="15"
+                                         SelectionChanged="LocalProjectsList_OnSelectionChanged"
+                                         AutomationProperties.Name="Local ADFication projects"
+                                         AutomationProperties.HelpText="Use the arrow keys to select a project and hear its latest verified checkpoint.">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding AccessibleLabel}" TextWrapping="Wrap" />
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <TextBlock x:Name="SelectedProjectText"
+                                           Margin="4"
+                                           Text="No local project selected."
+                                           TextWrapping="Wrap"
+                                           AutomationProperties.Name="Selected project details" />
+                                <Button x:Name="OpenLocalProjectButton"
+                                        Content="_Open selected project for review"
+                                        TabIndex="16"
+                                        IsEnabled="False"
+                                        HorizontalAlignment="Left"
+                                        Click="OpenLocalProjectButton_OnClick"
+                                        AutomationProperties.Name="Open selected local project for review" />
+                                <ProgressBar x:Name="PipelineProgressBar"
+                                             Height="22"
+                                             Margin="4"
+                                             Minimum="0"
+                                             Maximum="14"
+                                             Value="0"
+                                             AutomationProperties.Name="ADfication phase progress" />
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox x:Name="ReviewGroup" Header="Project review and conversation" Margin="0,0,0,12" IsEnabled="False">
+                            <StackPanel Margin="8">
+                                <TextBlock TextWrapping="Wrap"
+                                           Text="Creator review is enabled only for a selected local project with a current verified entitlement. Changes are proposed first and committed through validated project mutations." />
+                                <Label Target="{Binding ElementName=DescriptionsList}" Content="Audio _descriptions" />
+                                <ListBox x:Name="DescriptionsList"
+                                         MinHeight="90"
+                                         TabIndex="17"
+                                         AutomationProperties.Name="Audio description segments" />
+                                <Label Target="{Binding ElementName=ConversationTextBox}" Content="Project _request" />
+                                <TextBox x:Name="ConversationTextBox"
+                                         TabIndex="18"
+                                         AutomationProperties.Name="Natural conversation project request"
+                                         AutomationProperties.HelpText="Enter one request. ADFi will plan compound requests as dependency-safe atomic tasks." />
+                                <WrapPanel>
+                                    <Button x:Name="SubmitConversationButton"
+                                            Content="_Submit request"
+                                            TabIndex="19"
+                                            IsEnabled="False"
+                                            AutomationProperties.Name="Submit project request" />
+                                    <Button Content="Play _around selection"
+                                            TabIndex="20"
+                                            IsEnabled="False"
+                                            AutomationProperties.Name="Play preview around selected description" />
                                 </WrapPanel>
                             </StackPanel>
                         </GroupBox>
 
-                        <GroupBox Header="Earnings">
+                        <GroupBox Header="Earnings" Margin="0,0,0,12">
                             <StackPanel Margin="8">
-                                <TextBlock Text="Pending: $0.00" />
-                                <TextBlock Text="Available: $0.00" />
-                                <TextBlock Text="On hold or disputed: $0.00" />
-                                <TextBlock Text="Lifetime earnings: $0.00" />
+                                <TextBlock Text="Pending: unavailable until account services are connected" TextWrapping="Wrap" />
+                                <TextBlock Text="Available: unavailable until account services are connected" TextWrapping="Wrap" />
+                                <TextBlock Text="On hold or disputed: unavailable until account services are connected" TextWrapping="Wrap" />
+                                <TextBlock Text="Lifetime earnings: unavailable until account services are connected" TextWrapping="Wrap" />
                                 <Button Content="View earnings _details"
+                                        TabIndex="21"
                                         IsEnabled="False"
                                         HorizontalAlignment="Left"
                                         AutomationProperties.Name="View explainable earnings details" />
                             </StackPanel>
                         </GroupBox>
+
+                        <Expander Header="Technical activity"
+                                  Margin="4"
+                                  TabIndex="22"
+                                  AutomationProperties.Name="Technical activity for advanced users">
+                            <TextBox x:Name="TechnicalActivityTextBox"
+                                     Margin="8"
+                                     MinHeight="110"
+                                     TabIndex="23"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     AutomationProperties.Name="Technical activity log" />
+                        </Expander>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
@@ -87,7 +260,9 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <TextBlock Text="DISCOVER"
                                FontSize="24"
@@ -97,17 +272,57 @@
                                Margin="0,4,0,12"
                                TextWrapping="Wrap"
                                Text="Explore eligible public ADFied works, accessibility details, attribution, playlists, and qualified community feedback. No login is required to browse." />
-                    <ListView Grid.Row="2"
+                    <WrapPanel Grid.Row="2" Margin="0,0,0,8">
+                        <Button x:Name="RefreshDiscoverButton"
+                                Content="_Refresh DISCOVER"
+                                TabIndex="24"
+                                Click="RefreshDiscoverButton_OnClick"
+                                AutomationProperties.Name="Refresh public ADFied works" />
+                        <TextBlock x:Name="DiscoverStateText"
+                                   Margin="12,10,4,4"
+                                   Text="Public projects have not been loaded."
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.Name="DISCOVER loading state" />
+                    </WrapPanel>
+                    <ListView Grid.Row="3"
                               x:Name="DiscoverProjects"
+                              TabIndex="25"
                               AutomationProperties.Name="Public ADFied works"
-                              SelectionMode="Single">
-                        <ListViewItem AutomationProperties.Name="No published projects are available yet">
-                            <TextBlock Text="No published projects are available yet." />
-                        </ListViewItem>
+                              AutomationProperties.HelpText="Use arrow keys to select a work. Open it to use the official YouTube player on its ADFi page."
+                              SelectionMode="Single"
+                              SelectionChanged="DiscoverProjects_OnSelectionChanged">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="4">
+                                    <TextBlock Text="{Binding Title}"
+                                               FontSize="18"
+                                               FontWeight="SemiBold"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding AccessibilitySummary, StringFormat=Accessibility: {0}}"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding Attribution, StringFormat=Attribution: {0}}"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
                     </ListView>
+                    <WrapPanel Grid.Row="4" Margin="0,8,0,0">
+                        <Button x:Name="OpenDiscoverProjectButton"
+                                Content="_Open selected ADFi page"
+                                TabIndex="26"
+                                IsEnabled="False"
+                                Click="OpenDiscoverProjectButton_OnClick"
+                                AutomationProperties.Name="Open selected ADFi project page in the default browser"
+                                AutomationProperties.HelpText="The project page uses the official YouTube player." />
+                        <Button x:Name="CopyDiscoverProjectButton"
+                                Content="_Copy selected project page"
+                                TabIndex="27"
+                                IsEnabled="False"
+                                Click="CopyDiscoverProjectButton_OnClick"
+                                AutomationProperties.Name="Copy selected ADFi project page address" />
+                    </WrapPanel>
                 </Grid>
             </TabItem>
         </TabControl>
     </DockPanel>
 </Window>
-

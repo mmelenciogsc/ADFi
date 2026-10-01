@@ -11,7 +11,7 @@
     <ProjectReference Include="../ADFi.Infrastructure/ADFi.Infrastructure.csproj" />
     <ProjectReference Include="../ADFi.LocalAI/ADFi.LocalAI.csproj" />
     <ProjectReference Include="../ADFi.Media/ADFi.Media.csproj" />
+    <ProjectReference Include="../ADFi.Web/ADFi.Web.csproj" />
     <ProjectReference Include="../ADFi.YouTube/ADFi.YouTube.csproj" />
   </ItemGroup>
 </Project>
-

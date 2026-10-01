@@ -43,3 +43,25 @@ public static class Entitlements
         plan is SubscriptionPlan.Community or SubscriptionPlan.Creator;
 }
 
+/// <summary>
+/// Fail-closed desktop gating for local Creator operations. A cached account identity is not
+/// sufficient: the backend must have verified the current session and active Creator entitlement.
+/// </summary>
+public static class CreatorToolAccess
+{
+    public static bool CanSelectLocalSource(
+        SubscriptionPlan plan,
+        bool entitlementVerified,
+        bool rightsAccepted) =>
+        entitlementVerified
+        && Entitlements.CanCreate(plan)
+        && rightsAccepted;
+
+    public static bool CanUseConversationReview(
+        SubscriptionPlan plan,
+        bool entitlementVerified,
+        bool projectSelected) =>
+        entitlementVerified
+        && Entitlements.CanEditConversationally(plan)
+        && projectSelected;
+}

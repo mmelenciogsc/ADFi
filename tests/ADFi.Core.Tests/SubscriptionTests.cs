@@ -45,5 +45,37 @@ public sealed class SubscriptionTests
     {
         Assert.True(Entitlements.CanOpenDiscover(SubscriptionPlan.None));
     }
-}
 
+    [Theory]
+    [InlineData(SubscriptionPlan.None, true, true, false)]
+    [InlineData(SubscriptionPlan.Community, true, true, false)]
+    [InlineData(SubscriptionPlan.Creator, false, true, false)]
+    [InlineData(SubscriptionPlan.Creator, true, false, false)]
+    [InlineData(SubscriptionPlan.Creator, true, true, true)]
+    public void LocalSourceSelectionFailsClosedUntilEveryRequirementIsSatisfied(
+        SubscriptionPlan plan,
+        bool entitlementVerified,
+        bool rightsAccepted,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            CreatorToolAccess.CanSelectLocalSource(plan, entitlementVerified, rightsAccepted));
+    }
+
+    [Theory]
+    [InlineData(SubscriptionPlan.Community, true, true, false)]
+    [InlineData(SubscriptionPlan.Creator, false, true, false)]
+    [InlineData(SubscriptionPlan.Creator, true, false, false)]
+    [InlineData(SubscriptionPlan.Creator, true, true, true)]
+    public void ConversationReviewRequiresVerifiedCreatorAndSelectedProject(
+        SubscriptionPlan plan,
+        bool entitlementVerified,
+        bool projectSelected,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            CreatorToolAccess.CanUseConversationReview(plan, entitlementVerified, projectSelected));
+    }
+}

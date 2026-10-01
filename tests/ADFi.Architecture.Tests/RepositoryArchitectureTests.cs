@@ -26,6 +26,59 @@ public sealed class RepositoryArchitectureTests
     }
 
     [Fact]
+    public void DesktopCriticalControlsExposeStableScreenReaderNames()
+    {
+        var document = XDocument.Load(RepositoryPath("src", "ADFi.Desktop", "MainWindow.xaml"));
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var requiredNames = new[]
+        {
+            "EmailTextBox",
+            "PasswordInput",
+            "SignInButton",
+            "RightsAttestationCheckBox",
+            "SelectLocalVideoButton",
+            "LocalProjectsList",
+            "PipelineProgressBar",
+            "DescriptionsList",
+            "ConversationTextBox",
+            "RefreshDiscoverButton",
+            "DiscoverProjects",
+            "OpenDiscoverProjectButton",
+        };
+
+        foreach (var name in requiredNames)
+        {
+            var control = document.Descendants().Single(element => element.Attribute(xaml + "Name")?.Value == name);
+            Assert.False(
+                string.IsNullOrWhiteSpace(control.Attribute("AutomationProperties.Name")?.Value),
+                $"Critical control {name} needs a stable accessible name.");
+        }
+    }
+
+    [Fact]
+    public void DesktopUsesNativeControlsAndExplicitKeyboardOrder()
+    {
+        var document = XDocument.Load(RepositoryPath("src", "ADFi.Desktop", "MainWindow.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        Assert.Empty(document.Descendants(presentation + "Canvas"));
+
+        var tabIndices = document.Descendants()
+            .Select(element => element.Attribute("TabIndex")?.Value)
+            .Where(value => value is not null)
+            .Select(value => int.Parse(value!, System.Globalization.CultureInfo.InvariantCulture))
+            .ToArray();
+        Assert.Equal(Enumerable.Range(1, 27), tabIndices.Order());
+    }
+
+    [Fact]
+    public void DesktopRaisesOneUiAutomationLiveRegionEventPerAnnouncement()
+    {
+        var code = File.ReadAllText(RepositoryPath("src", "ADFi.Desktop", "MainWindow.xaml.cs"));
+        Assert.Contains("AutomationEvents.LiveRegionChanged", code, StringComparison.Ordinal);
+        Assert.Contains("private void Announce(string message)", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RequiredMonorepoProjectsExist()
     {
         var required = new[]
