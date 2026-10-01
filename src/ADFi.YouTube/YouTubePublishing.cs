@@ -31,6 +31,21 @@ public interface IYouTubePublisher
         CancellationToken cancellationToken);
 }
 
+public sealed record YouTubeAssetStatus(
+    string VideoId,
+    bool Exists,
+    string? ChannelId,
+    string? UploadStatus,
+    YouTubeVisibility? Visibility,
+    bool Embeddable,
+    string? FailureReason,
+    DateTimeOffset CheckedAtUtc);
+
+public interface IYouTubeStatusClient
+{
+    Task<YouTubeAssetStatus> RefreshAsync(string videoId, CancellationToken cancellationToken);
+}
+
 public sealed record GoogleOAuthConfiguration(string ClientId, Uri LoopbackRedirectUri);
 
 public sealed record GoogleAuthorizationRequest(

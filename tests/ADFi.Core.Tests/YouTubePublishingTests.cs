@@ -116,6 +116,42 @@ public sealed class YouTubePublishingTests
         Assert.Contains("code_verifier", handler.Body, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task StatusRefreshReadsProviderStateAndDoesNotInventRightsClaims()
+    {
+        var handler = new YouTubeHandler();
+        using var client = new HttpClient(handler);
+        var publisher = new GoogleYouTubePublisher(client, new FixedTokenProvider(), new FixedTimeProvider());
+
+        var status = await publisher.RefreshAsync("abcDEF123_-", TestContext.Current.CancellationToken);
+        var decision = YouTubeStatusPolicy.Evaluate(status, ProjectPublicationState.CommunityActive);
+
+        Assert.True(status.Exists);
+        Assert.Equal("channel-1", status.ChannelId);
+        Assert.Equal(YouTubeVisibility.Public, status.Visibility);
+        Assert.Equal(ProjectPublicationState.CommunityActive, decision.ProjectState);
+        Assert.True(decision.Availability.Playable);
+    }
+
+    [Theory]
+    [InlineData(false, "processed", true, YouTubeVisibility.Public, ProjectPublicationState.Removed)]
+    [InlineData(true, "rejected", true, YouTubeVisibility.Public, ProjectPublicationState.Blocked)]
+    [InlineData(true, "processed", false, YouTubeVisibility.Public, ProjectPublicationState.Blocked)]
+    [InlineData(true, "processed", true, YouTubeVisibility.Private, ProjectPublicationState.Private)]
+    [InlineData(true, "processed", true, YouTubeVisibility.Unlisted, ProjectPublicationState.Unlisted)]
+    public void StatusPolicyFailsClosedForUnavailableAssets(
+        bool exists,
+        string uploadStatus,
+        bool embeddable,
+        YouTubeVisibility visibility,
+        ProjectPublicationState expected)
+    {
+        var status = new YouTubeAssetStatus(
+            "abcDEF123_-", exists, "channel-1", uploadStatus, visibility, embeddable, null, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(expected, YouTubeStatusPolicy.Evaluate(status, ProjectPublicationState.CommunityActive).ProjectState);
+    }
+
     private sealed class FixedTokenProvider : IYouTubeAccessTokenProvider
     {
         public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken) =>
@@ -139,6 +175,14 @@ public sealed class YouTubePublishingTests
             if (request.RequestUri.AbsolutePath.EndsWith("/channels", StringComparison.Ordinal))
             {
                 return Json(HttpStatusCode.OK, "{\"items\":[{\"id\":\"channel-1\",\"snippet\":{\"title\":\"Expected channel\"}}]}");
+            }
+
+            if (request.RequestUri.AbsolutePath.EndsWith("/videos", StringComparison.Ordinal)
+                && request.Method == HttpMethod.Get)
+            {
+                return Json(
+                    HttpStatusCode.OK,
+                    "{\"items\":[{\"id\":\"abcDEF123_-\",\"snippet\":{\"channelId\":\"channel-1\"},\"status\":{\"uploadStatus\":\"processed\",\"privacyStatus\":\"public\",\"embeddable\":true}}]}");
             }
 
             if (request.Method == HttpMethod.Post)

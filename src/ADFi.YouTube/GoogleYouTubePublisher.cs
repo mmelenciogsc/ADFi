@@ -13,7 +13,7 @@ namespace ADFi.YouTube;
 public sealed class GoogleYouTubePublisher(
     HttpClient httpClient,
     IYouTubeAccessTokenProvider accessTokenProvider,
-    TimeProvider? timeProvider = null) : IYouTubePublisher
+    TimeProvider? timeProvider = null) : IYouTubePublisher, IYouTubeStatusClient
 {
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
 
@@ -104,6 +104,41 @@ public sealed class GoogleYouTubePublisher(
         return new(result.Id, actualChannel.ChannelId, request.Visibility, clock.GetUtcNow());
     }
 
+    public async Task<YouTubeAssetStatus> RefreshAsync(
+        string videoId,
+        CancellationToken cancellationToken)
+    {
+        if (!IsValidVideoId(videoId))
+        {
+            throw new ArgumentException("YouTube video ID is invalid.", nameof(videoId));
+        }
+
+        var token = await accessTokenProvider.GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
+        using var request = AuthorizedRequest(
+            HttpMethod.Get,
+            $"https://www.googleapis.com/youtube/v3/videos?part=id,snippet,status&id={Uri.EscapeDataString(videoId)}",
+            token);
+        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        await EnsureSuccessAsync(response, "YOUTUBE_STATUS_REFRESH_FAILED", cancellationToken).ConfigureAwait(false);
+        var result = await response.Content.ReadFromJsonAsync<VideoListResponse>(cancellationToken)
+            .ConfigureAwait(false);
+        var video = result?.Items?.SingleOrDefault();
+        if (video is null)
+        {
+            return new(videoId, false, null, null, null, false, "NOT_RETURNED_BY_YOUTUBE", clock.GetUtcNow());
+        }
+
+        return new(
+            video.Id,
+            true,
+            video.Snippet.ChannelId,
+            video.Status.UploadStatus,
+            ParseVisibility(video.Status.PrivacyStatus),
+            video.Status.Embeddable,
+            video.Status.FailureReason ?? video.Status.RejectionReason,
+            clock.GetUtcNow());
+    }
+
     private static HttpRequestMessage AuthorizedRequest(HttpMethod method, string uri, string token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
@@ -136,6 +171,17 @@ public sealed class GoogleYouTubePublisher(
         _ => throw new ArgumentOutOfRangeException(nameof(visibility)),
     };
 
+    private static YouTubeVisibility? ParseVisibility(string? value) => value switch
+    {
+        "private" => YouTubeVisibility.Private,
+        "unlisted" => YouTubeVisibility.Unlisted,
+        "public" => YouTubeVisibility.Public,
+        _ => null,
+    };
+
+    private static bool IsValidVideoId(string value) =>
+        value.Length == 11 && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
+
     private sealed record ChannelListResponse(
         [property: JsonPropertyName("items")] IReadOnlyList<ChannelItem>? Items);
 
@@ -146,4 +192,21 @@ public sealed class GoogleYouTubePublisher(
     private sealed record ChannelSnippet([property: JsonPropertyName("title")] string Title);
 
     private sealed record VideoInsertResponse([property: JsonPropertyName("id")] string Id);
+
+    private sealed record VideoListResponse(
+        [property: JsonPropertyName("items")] IReadOnlyList<VideoItem>? Items);
+
+    private sealed record VideoItem(
+        [property: JsonPropertyName("id")] string Id,
+        [property: JsonPropertyName("snippet")] VideoSnippet Snippet,
+        [property: JsonPropertyName("status")] VideoStatus Status);
+
+    private sealed record VideoSnippet([property: JsonPropertyName("channelId")] string ChannelId);
+
+    private sealed record VideoStatus(
+        [property: JsonPropertyName("uploadStatus")] string? UploadStatus,
+        [property: JsonPropertyName("privacyStatus")] string? PrivacyStatus,
+        [property: JsonPropertyName("embeddable")] bool Embeddable,
+        [property: JsonPropertyName("failureReason")] string? FailureReason,
+        [property: JsonPropertyName("rejectionReason")] string? RejectionReason);
 }
