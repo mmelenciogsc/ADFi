@@ -54,6 +54,13 @@ public interface INarrationProcessRunner
         CancellationToken cancellationToken);
 }
 
+public interface INarrationSynthesizer
+{
+    Task<NarrationSynthesisResult> SynthesizeAsync(
+        NarrationSynthesisRequest request,
+        CancellationToken cancellationToken);
+}
+
 public sealed class PiperProcessRunner : INarrationProcessRunner
 {
     public async Task<NarrationProcessResult> RunAsync(
@@ -69,7 +76,7 @@ public sealed class PiperProcessRunner : INarrationProcessRunner
 public sealed class PiperNarrationService(
     PiperConfiguration configuration,
     string cacheDirectory,
-    INarrationProcessRunner processRunner)
+    INarrationProcessRunner processRunner) : INarrationSynthesizer
 {
     public async Task<NarrationSynthesisResult> SynthesizeAsync(
         NarrationSynthesisRequest request,
