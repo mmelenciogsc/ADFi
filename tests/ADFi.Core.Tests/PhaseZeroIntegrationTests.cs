@@ -64,6 +64,24 @@ public sealed class PhaseZeroIntegrationTests
             Assert.Equal(TimeSpan.Zero, frameCandidates[0].SourceTime);
             Assert.True(frameCandidates.Count <= 5);
 
+            var visualIndex = await new VisualIndexService(TimeProvider.System).BuildAsync(
+                result.Attestation.ProjectId,
+                result.Source,
+                projectPath,
+                maximumImageDimension: 320,
+                maximumFramesPerScene: 3,
+                transcript: [],
+                narrationWindows: [new(TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(900))],
+                cancellationToken);
+            var indexedScene = Assert.Single(visualIndex.Scenes);
+            Assert.NotEmpty(indexedScene.Keyframes);
+            Assert.All(indexedScene.Keyframes, frame =>
+            {
+                Assert.True(frame.Width <= 320 && frame.Height <= 320);
+                Assert.True(File.Exists(Path.Combine(projectPath, frame.RelativeImagePath.Replace('/', Path.DirectorySeparatorChar))));
+            });
+            Assert.True(File.Exists(Path.Combine(projectPath, "manifests", "visual-index.json")));
+
             var narrationPath = Path.Combine(testRoot, "narration.wav");
             await GenerateNarrationFixtureAsync(narrationPath);
             var outputPath = Path.Combine(testRoot, "adfied.mp4");
