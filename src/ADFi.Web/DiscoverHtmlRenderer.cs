@@ -50,6 +50,11 @@ public static class DiscoverHtmlRenderer
         return html.ToString();
     }
 
+    public static string RenderUnavailable() =>
+        """
+        <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DISCOVER unavailable — ADFi</title></head><body><a href="#main">Skip to main content</a><header><strong>ADFi</strong><nav aria-label="Primary"><a href="/my-adfi">MY ADFi</a> <a href="/discover" aria-current="page">DISCOVER</a></nav></header><main id="main"><h1>DISCOVER</h1><p role="alert">DISCOVER is temporarily unavailable. Please try again later.</p></main></body></html>
+        """;
+
     private static void AppendProject(StringBuilder html, DiscoverSurface project)
     {
         if (!YouTubeVideoIdPattern.IsMatch(project.YouTubeVideoId))

@@ -49,26 +49,26 @@ public sealed class PublicApiTests : IClassFixture<WebApplicationFactory<Program
     }
 
     [Fact]
-    public async Task PublicDiscoverDoesNotRequireAuthentication()
+    public async Task PublicDiscoverFailsClearlyWhenPersistenceIsUnavailable()
     {
         using var response = await client.GetAsync(
             "/api/v1/discover",
             TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
     }
 
     [Fact]
-    public async Task PublicDiscoverHtmlUsesAccessibleLandmarksWithoutLogin()
+    public async Task PublicDiscoverUnavailablePageUsesAccessibleLandmarksWithoutLogin()
     {
         using var response = await client.GetAsync(
             "/discover",
             TestContext.Current.CancellationToken);
         var html = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Contains("<main id=\"main\">", html, StringComparison.Ordinal);
         Assert.Contains("<h1>DISCOVER</h1>", html, StringComparison.Ordinal);
-        Assert.Contains("No eligible public ADFied works", html, StringComparison.Ordinal);
+        Assert.Contains("temporarily unavailable", html, StringComparison.Ordinal);
     }
 
     [Theory]

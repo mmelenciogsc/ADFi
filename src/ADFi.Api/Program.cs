@@ -27,6 +27,8 @@ var persistenceConfigured = !string.IsNullOrWhiteSpace(connectionString);
 var registrationConfigured = persistenceConfigured && smtpOptions is not null;
 var payPalOptions = ReadPayPalOptions(builder.Configuration);
 var paymentsConfigured = persistenceConfigured && payPalOptions is not null;
+var publicBaseConfigured = Uri.TryCreate(
+    builder.Configuration["PublicBaseUrl"], UriKind.Absolute, out var configuredPublicBaseUri);
 
 builder.Services.AddSingleton(TimeProvider.System);
 
@@ -35,6 +37,12 @@ if (persistenceConfigured)
     builder.Services.AddSingleton(new AdfiDatabase(connectionString!));
     builder.Services.AddSingleton<AccountRepository>();
     builder.Services.AddSingleton<SubscriptionRepository>();
+    if (publicBaseConfigured)
+    {
+        builder.Services.AddSingleton(services => new DiscoverRepository(
+            services.GetRequiredService<AdfiDatabase>(),
+            configuredPublicBaseUri!));
+    }
 }
 
 if (smtpOptions is not null)
@@ -129,14 +137,38 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check 
 app.MapGet("/api/v1/plans", () => Results.Ok(PlanCatalog.PaidPlans))
     .RequireRateLimiting("public")
     .AllowAnonymous();
-app.MapGet("/api/v1/discover", () => Results.Ok(Array.Empty<object>()))
-    .RequireRateLimiting("public")
-    .AllowAnonymous();
-app.MapGet("/discover", () => Results.Content(
-        DiscoverHtmlRenderer.RenderIndex([]),
-        "text/html; charset=utf-8"))
-    .RequireRateLimiting("public")
-    .AllowAnonymous();
+if (persistenceConfigured && publicBaseConfigured)
+{
+    app.MapGet("/api/v1/discover", async (
+            DiscoverRepository repository,
+            CancellationToken cancellationToken) =>
+        Results.Ok(await repository.ListAsync(50, cancellationToken).ConfigureAwait(false)))
+        .RequireRateLimiting("public")
+        .AllowAnonymous();
+    app.MapGet("/discover", async (
+            DiscoverRepository repository,
+            CancellationToken cancellationToken) =>
+        Results.Content(
+            DiscoverHtmlRenderer.RenderIndex(
+                await repository.ListAsync(50, cancellationToken).ConfigureAwait(false)),
+            "text/html; charset=utf-8"))
+        .RequireRateLimiting("public")
+        .AllowAnonymous();
+}
+else
+{
+    app.MapGet("/api/v1/discover", () => Results.Problem(
+            "DISCOVER is unavailable until PostgreSQL and PublicBaseUrl are configured.",
+            statusCode: StatusCodes.Status503ServiceUnavailable))
+        .RequireRateLimiting("public")
+        .AllowAnonymous();
+    app.MapGet("/discover", () => Results.Content(
+            DiscoverHtmlRenderer.RenderUnavailable(),
+            "text/html; charset=utf-8",
+            statusCode: StatusCodes.Status503ServiceUnavailable))
+        .RequireRateLimiting("public")
+        .AllowAnonymous();
+}
 
 if (registrationConfigured)
 {
