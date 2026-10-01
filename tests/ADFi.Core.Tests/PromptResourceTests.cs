@@ -13,6 +13,7 @@ public sealed class PromptResourceTests
             "ADFI_PLANNER_SYSTEM",
             "ADFI_TASK_EXECUTOR_SYSTEM",
             "ADFI_VQA_SYSTEM",
+            "ADFI_MOMENT_VQA_SYSTEM",
             "ADFI_OCR_RECONCILER_SYSTEM",
             "ADFI_AD_WRITER_SYSTEM",
             "ADFI_EDIT_VALIDATOR_SYSTEM",
@@ -37,10 +38,11 @@ public sealed class PromptResourceTests
             RepositoryPath("prompts", "semantic-tools.json"),
             CancellationToken.None);
 
-        Assert.Equal(50, document.Tools.Count);
+        Assert.Equal(53, document.Tools.Count);
         Assert.Contains(document.Tools, tool => tool.Name == "ApplyProjectMutation" && tool.Mutates);
         Assert.Contains(document.Tools, tool => tool.Name == "RewriteAdSegment" && !tool.Mutates);
         Assert.Contains(document.Tools, tool => tool.Name == "RenderFinalVideo");
+        Assert.Contains(document.Tools, tool => tool.Name == "AnswerMomentQuestion" && !tool.Mutates);
     }
 
     private static string RepositoryPath(params string[] parts)

@@ -16,6 +16,7 @@ public sealed class SubscriptionTests
                 Assert.False(community.CanCreateAdfiedMedia);
                 Assert.False(community.CanUseNaturalConversationEditing);
                 Assert.True(community.CanParticipateEconomically);
+                Assert.True(community.CanWatchAndAsk);
             },
             creator =>
             {
@@ -24,6 +25,7 @@ public sealed class SubscriptionTests
                 Assert.True(creator.CanCreateAdfiedMedia);
                 Assert.True(creator.CanUseNaturalConversationEditing);
                 Assert.True(creator.CanParticipateEconomically);
+                Assert.True(creator.CanWatchAndAsk);
             });
     }
 

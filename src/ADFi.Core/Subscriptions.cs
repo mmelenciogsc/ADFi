@@ -13,7 +13,8 @@ public sealed record PlanDefinition(
     int MonthlyPriceUsdCents,
     bool CanCreateAdfiedMedia,
     bool CanUseNaturalConversationEditing,
-    bool CanParticipateEconomically);
+    bool CanParticipateEconomically,
+    bool CanWatchAndAsk = true);
 
 public static class PlanCatalog
 {

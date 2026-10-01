@@ -83,6 +83,43 @@ public sealed class PhaseZeroIntegrationTests
             });
             Assert.True(File.Exists(Path.Combine(projectPath, "manifests", "visual-index.json")));
 
+            using (var viewerEvidenceStore = new PrivateEphemeralEvidenceStore(
+                       Path.Combine(testRoot, "viewer-evidence")))
+            {
+                var viewerSource = InteractiveVideoSource.LocalFile(sourcePath);
+                var viewerSessionId = Guid.NewGuid();
+                var viewerRequestId = Guid.NewGuid();
+                var momentEvidence = await new FfmpegLocalMomentEvidenceProvider(
+                        viewerEvidenceStore,
+                        "ffmpeg",
+                        new(3, 600, 320, 5000))
+                    .AcquireAsync(
+                        new(
+                            viewerSessionId,
+                            viewerRequestId,
+                            viewerSource,
+                            500,
+                            MomentQuestionClassifier.Classify(
+                                "What is happening?",
+                                new(3, 600, 320, 5000)),
+                            true,
+                            viewerEvidenceStore.GetSessionDirectory(viewerSessionId),
+                            TimeProvider.System.GetUtcNow()),
+                        cancellationToken);
+                Assert.Equal(3, momentEvidence.Count);
+                Assert.All(momentEvidence, item =>
+                {
+                    Assert.True(item.Ephemeral);
+                    Assert.True(item.PixelWidth <= 320 && item.PixelHeight <= 320);
+                    Assert.True(File.Exists(item.PrivateEphemeralPath));
+                });
+                await viewerEvidenceStore.DeleteRequestAsync(
+                    viewerSessionId,
+                    viewerRequestId,
+                    cancellationToken);
+                Assert.All(momentEvidence, item => Assert.False(File.Exists(item.PrivateEphemeralPath)));
+            }
+
             var narrationPath = Path.Combine(testRoot, "narration.wav");
             await GenerateNarrationFixtureAsync(narrationPath);
             var outputPath = Path.Combine(testRoot, "adfied.mp4");
