@@ -9,9 +9,9 @@ Use current official distribution channels and pin exact production versions and
 | Qwen3-VL | Local visual reasoning | <https://ollama.com/library/qwen3-vl> | Balanced default is `qwen3-vl:4b`; do not assume all model tiers have identical resource needs. |
 | FFmpeg/ffprobe | Probe, extraction, mixing and rendering | <https://ffmpeg.org/download.html> | Record build configuration and comply with the license of the distributed build. |
 | OpenCV / OpenCvSharp | Deterministic visual processing and face continuity | <https://opencv.org/releases/> and <https://github.com/shimat/opencvsharp> | OpenCV 4.13 wrapper/runtime is NuGet-pinned; YuNet/SFace model files require their own release manifest. |
-| Whisper | Chunk transcription | <https://github.com/openai/whisper> | Runtime/model integration is pending; models must be hashed and selected by hardware policy. |
+| Whisper | Chunk transcription | <https://github.com/openai/whisper> | Official `openai-whisper` 20250625 is pinned for the bounded worker; models remain external, hashed assets selected by hardware policy. |
 | Tesseract | Exact OCR fallback | <https://github.com/tesseract-ocr/tesseract> | Invoke only for evidence crops requiring exact literal text. |
-| Piper | Segment narration | <https://github.com/OHF-Voice/piper1-gpl> | Current engine is GPL-3.0. Voice datasets/models are separately licensed. |
+| Piper | Segment narration | <https://github.com/OHF-Voice/piper1-gpl> | `piper-tts` 1.8.0 is pinned for Windows installation. Current engine is GPL-3.0; voice datasets/models are separately licensed. |
 | Piper voices | Five preview choices | <https://huggingface.co/rhasspy/piper-voices> | Cori high, LJSpeech high, Bryce medium (public domain); Joe medium (CC0-1.0); Sam medium (Apache-2.0). Preserve applicable notices and verify hashes at install time. |
 | PostgreSQL | Server persistence | <https://www.postgresql.org/download/linux/ubuntu/> | Use a supported release, local-only database listener where practical, and encrypted backups. |
 | PayPal | Recurring subscriptions/webhooks/payouts | <https://developer.paypal.com/docs/subscriptions/> | Start in sandbox. Client secret and webhook ID remain server-only. |
