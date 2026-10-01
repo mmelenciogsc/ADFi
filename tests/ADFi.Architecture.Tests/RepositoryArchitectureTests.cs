@@ -77,6 +77,18 @@ public sealed class RepositoryArchitectureTests
         Assert.Contains("adfi_basis_points = 3000", sql, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void UbuntuActivationMigratesBeforeSwitchAndRollsBackFailedRelease()
+    {
+        var script = File.ReadAllText(RepositoryPath("deploy", "ubuntu", "install-release.sh"));
+        var migration = script.IndexOf("--migrate-only", StringComparison.Ordinal);
+        var activation = script.IndexOf("ln -sfn \"${release_directory}\"", StringComparison.Ordinal);
+
+        Assert.True(migration >= 0 && migration < activation);
+        Assert.Contains("previous_release", script, StringComparison.Ordinal);
+        Assert.Contains("health/ready", script, StringComparison.Ordinal);
+    }
+
     private static string RepositoryPath(params string[] parts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

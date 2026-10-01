@@ -55,6 +55,20 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+
+if (args.Contains("--migrate-only", StringComparer.Ordinal))
+{
+    if (!persistenceConfigured)
+    {
+        throw new InvalidOperationException("ConnectionStrings:ADFi is required for migration.");
+    }
+
+    await app.Services.GetRequiredService<AdfiDatabase>()
+        .ApplyMigrationsAsync(CancellationToken.None)
+        .ConfigureAwait(false);
+    return;
+}
+
 app.UseExceptionHandler();
 app.UseHttpsRedirection();
 app.UseRateLimiter();
