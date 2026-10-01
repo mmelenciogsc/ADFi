@@ -83,17 +83,19 @@ public sealed class RepositoryArchitectureTests
 
         var question = document.Descendants().Single(element => element.Attribute(xaml + "Name")?.Value == "MomentQuestionTextBox");
         var dictate = document.Descendants().Single(element => element.Attribute(xaml + "Name")?.Value == "DictateButton");
-        Assert.Equal("11", question.Attribute("TabIndex")?.Value);
-        Assert.Equal("12", dictate.Attribute("TabIndex")?.Value);
+        var connectChatGpt = document.Descendants().Single(element => element.Attribute(xaml + "Name")?.Value == "ContinueWithChatGptButton");
+        Assert.Equal("15", question.Attribute("TabIndex")?.Value);
+        Assert.Equal("16", dictate.Attribute("TabIndex")?.Value);
         Assert.Equal("Ask about this moment", question.Attribute("AutomationProperties.Name")?.Value);
         Assert.Equal("DICTATE question using Windows voice typing", dictate.Attribute("AutomationProperties.Name")?.Value);
+        Assert.Equal("Continue with ChatGPT in the system browser", connectChatGpt.Attribute("AutomationProperties.Name")?.Value);
         var tabIndices = document.Descendants()
             .Select(element => element.Attribute("TabIndex")?.Value)
             .Where(value => value is not null)
             .Select(value => int.Parse(value!, System.Globalization.CultureInfo.InvariantCulture))
             .Order()
             .ToArray();
-        Assert.Equal(Enumerable.Range(1, 25), tabIndices);
+        Assert.Equal(Enumerable.Range(1, 29), tabIndices);
     }
 
     [Fact]

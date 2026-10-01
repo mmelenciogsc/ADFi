@@ -12,7 +12,9 @@ public sealed record ChatGptAuthorizationAttempt(
     Uri RedirectUri,
     string RequestedClientId,
     string? ExpectedIssuedClientId,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    string? IdTokenHint = null,
+    string? LoginHint = null);
 
 public sealed record ChatGptAuthorizationCallback(
     string Code,
@@ -27,6 +29,8 @@ public static class ChatGptAuthorization
     public const string ApiResource = "https://api.openai.com/v1";
     public static readonly Uri AuthorizationEndpoint = new("https://auth.openai.com/api/accounts/authorize");
     public static readonly Uri TokenEndpoint = new("https://auth.openai.com/api/accounts/oauth/token");
+    public static readonly Uri RevocationEndpoint = new("https://auth.openai.com/api/accounts/oauth/revoke");
+    public static readonly Uri JwksEndpoint = new("https://auth.openai.com/.well-known/jwks.json");
 
     private const string Scope = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
 
@@ -73,6 +77,18 @@ public static class ChatGptAuthorization
         if (attempt.RequestedClientId == InitialClientId)
         {
             values["agent_name_hint"] = "ADFi";
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(attempt.IdTokenHint))
+            {
+                values["id_token_hint"] = attempt.IdTokenHint;
+            }
+
+            if (!string.IsNullOrWhiteSpace(attempt.LoginHint))
+            {
+                values["login_hint"] = attempt.LoginHint;
+            }
         }
 
         var query = string.Join('&', values.Select(pair =>
@@ -122,4 +138,3 @@ public static class ChatGptAuthorization
         return CryptographicOperations.FixedTimeEquals(leftHash, rightHash);
     }
 }
-

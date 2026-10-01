@@ -6,6 +6,7 @@ Use current official distribution channels and pin exact production versions and
 | --- | --- | --- | --- |
 | .NET 10 / ASP.NET Core / WPF | Desktop and API | <https://dotnet.microsoft.com/download/dotnet/10.0> | Microsoft product terms; SDK 10.0.401 is pinned in `global.json`. |
 | Microsoft Edge WebView2 | Official embedded YouTube playback | <https://developer.microsoft.com/microsoft-edge/webview2/> | NuGet SDK is pinned; use the supported Evergreen runtime. ADFi invokes the official YouTube IFrame API and does not retrieve media URLs. |
+| Microsoft IdentityModel | OpenID Connect ID-token/JWKS validation | <https://github.com/AzureAD/azure-activedirectory-identitymodel-extensions-for-dotnet> | NuGet version is pinned; validates signatures, issuer, audience and expiry before a ChatGPT profile is accepted. |
 | Ollama | Default local model runtime | <https://ollama.com/download/windows> | Record installed runtime and model digest per run. |
 | Qwen3-VL | Local visual reasoning | <https://ollama.com/library/qwen3-vl> | Balanced default is the verified `qwen3-vl:4b-instruct` tag; do not assume all model tiers have identical resource needs. |
 | FFmpeg/ffprobe | Probe, extraction, mixing and rendering | <https://ffmpeg.org/download.html> | Record build configuration and comply with the license of the distributed build. |

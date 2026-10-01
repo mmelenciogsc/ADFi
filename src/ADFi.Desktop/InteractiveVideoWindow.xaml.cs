@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Runtime.InteropServices;
@@ -11,6 +12,8 @@ using ADFi.Conversation;
 using ADFi.Core;
 using ADFi.LocalAI;
 using ADFi.Media;
+using ADFi.Infrastructure.CloudAI;
+using ADFi.Infrastructure.Security;
 using ADFi.Web;
 using Microsoft.Win32;
 
@@ -38,6 +41,8 @@ public partial class InteractiveVideoWindow : Window, IDisposable
     private InteractiveVideoSessionCoordinator? viewerSession;
     private IPlaybackController? playbackController;
     private OllamaModelRuntime? localRuntime;
+    private HttpClient? chatGptHttpClient;
+    private ChatGptProfileService? chatGptProfiles;
     private InteractiveVideoSource? currentSource;
     private TimeSpan localDuration;
     private bool sliderUpdate;
@@ -80,6 +85,18 @@ public partial class InteractiveVideoWindow : Window, IDisposable
         }
 
         CapturePolicyText.Text = featurePolicy.AccessibilityStatus;
+        chatGptHttpClient = new HttpClient
+        {
+            BaseAddress = new Uri("https://api.openai.com/"),
+            Timeout = TimeSpan.FromMinutes(3),
+        };
+        chatGptProfiles = new ChatGptProfileService(
+            new DpapiFileSecretStore(configuration.ProtectedCredentialRoot, "ADFi ChatGPT plan profiles v1"),
+            chatGptHttpClient,
+            TimeProvider.System,
+            featurePolicy.ChatGptPlanUsageIntegrationEnabled);
+        await chatGptProfiles.InitializeAsync(CancellationToken.None);
+        await RefreshChatGptProfilesAsync(CancellationToken.None);
         if (initialPublication is not null)
         {
             await LoadDiscoverPublicationAsync(initialPublication, CancellationToken.None);
@@ -112,6 +129,13 @@ public partial class InteractiveVideoWindow : Window, IDisposable
         {
             localRuntime.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
+
+        if (chatGptProfiles is not null)
+        {
+            chatGptProfiles.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        chatGptHttpClient?.Dispose();
 
         LocalMediaPlayer.Close();
         evidenceStore.Dispose();
@@ -259,17 +283,21 @@ public partial class InteractiveVideoWindow : Window, IDisposable
                     limits,
                     TimeSpan.FromSeconds(Math.Clamp(featurePolicy.TransactionLifetimeSeconds, 30, 300)))),
         };
-        var providers = new List<IVqaProvider>
+        var providers = new List<IVqaProvider>();
+        if (chatGptProfiles is not null && chatGptHttpClient is not null)
         {
-            new UnavailableVqaProvider(
+            providers.Add(new ChatGptMomentVqaProvider(
+                chatGptProfiles,
+                new ChatGptPlanResponsesClient(chatGptHttpClient),
+                TimeProvider.System));
+        }
+        else
+        {
+            providers.Add(new UnavailableVqaProvider(
                 VqaProviderKind.ChatGpt,
-                featurePolicy.ChatGptPlanUsageIntegrationEnabled
-                    ? VqaProviderAvailabilityState.NotConnected
-                    : VqaProviderAvailabilityState.ProviderApprovalRequired,
-                featurePolicy.ChatGptPlanUsageIntegrationEnabled
-                    ? "ChatGPT is not connected. Connect an eligible ChatGPT account and grant plan usage before asking."
-                    : "ChatGPT plan usage is disabled until OpenAI approves ADFi's paid application integration."),
-        };
+                VqaProviderAvailabilityState.Unavailable,
+                "ChatGPT profile services are unavailable."));
+        }
         if (plan == SubscriptionPlan.Creator)
         {
             var assessment = await new CreatorHardwareProfileStore(
@@ -629,6 +657,90 @@ public partial class InteractiveVideoWindow : Window, IDisposable
     private async void ProviderComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e) =>
         await UpdateProviderStatusAsync(CancellationToken.None);
 
+    private async void ContinueWithChatGptButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (chatGptProfiles is null || !featurePolicy.ChatGptPlanUsageIntegrationEnabled)
+        {
+            Announce("ChatGPT plan usage is disabled until OpenAI approves ADFi's paid application integration.");
+            return;
+        }
+
+        ContinueWithChatGptButton.IsEnabled = false;
+        Announce("Opening the system browser to continue with ChatGPT.");
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            var result = await chatGptProfiles.SignInAsync(
+                uri =>
+                {
+                    Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+                    return Task.CompletedTask;
+                },
+                timeout.Token);
+            await RefreshChatGptProfilesAsync(CancellationToken.None);
+            await UpdateProviderStatusAsync(CancellationToken.None);
+            Announce(result.AccessibleMessage);
+        }
+        catch (OperationCanceledException)
+        {
+            Announce("ChatGPT connection timed out. No account change was made.");
+        }
+        catch (Exception exception)
+        {
+            ReportError("Connect ChatGPT", exception);
+        }
+        finally
+        {
+            ContinueWithChatGptButton.IsEnabled = featurePolicy.ChatGptPlanUsageIntegrationEnabled;
+        }
+    }
+
+    private void ManageChatGptUsageButton_OnClick(object sender, RoutedEventArgs e) =>
+        Process.Start(new ProcessStartInfo("https://chatgpt.com/settings/usage") { UseShellExecute = true });
+
+    private async void DisconnectChatGptButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (chatGptProfiles is null)
+        {
+            return;
+        }
+
+        DisconnectChatGptButton.IsEnabled = false;
+        try
+        {
+            await chatGptProfiles.SignOutSelectedAsync(CancellationToken.None);
+            await RefreshChatGptProfilesAsync(CancellationToken.None);
+            await UpdateProviderStatusAsync(CancellationToken.None);
+            Announce("ChatGPT disconnected from ADFi on this Windows account.");
+        }
+        catch (Exception exception)
+        {
+            ReportError("Disconnect ChatGPT", exception);
+        }
+    }
+
+    private async void ChatGptProfileComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (chatGptProfiles is null
+            || ChatGptProfileComboBox.SelectedItem is not ChatGptProfileChoice choice
+            || choice.IsSelected)
+        {
+            return;
+        }
+
+        try
+        {
+            await chatGptProfiles.SelectProfileAsync(choice.ProfileId, CancellationToken.None);
+            await RefreshChatGptProfilesAsync(CancellationToken.None);
+            await UpdateProviderStatusAsync(CancellationToken.None);
+            Announce($"Selected ChatGPT profile {choice.Label}.");
+        }
+        catch (Exception exception)
+        {
+            ReportError("Select ChatGPT profile", exception);
+        }
+    }
+
     private void PreviewProviderRequestButton_OnClick(object sender, RoutedEventArgs e)
     {
         var question = MomentQuestionTextBox.Text.Trim();
@@ -659,9 +771,19 @@ public partial class InteractiveVideoWindow : Window, IDisposable
 
         if (choice.Kind == VqaProviderKind.ChatGpt)
         {
-            ProviderStatusText.Text = featurePolicy.ChatGptPlanUsageIntegrationEnabled
-                ? "ChatGPT: Not Connected. Plan usage has not been granted or verified. ADFi never requests a ChatGPT password or API key and cannot access prior conversations."
-                : "ChatGPT: Provider Approval Required. OpenAI approval is required before ADFi can offer plan usage in this paid application. No password or API key is requested.";
+            if (!featurePolicy.ChatGptPlanUsageIntegrationEnabled || chatGptProfiles is null)
+            {
+                ProviderStatusText.Text = "ChatGPT: Provider Approval Required. OpenAI approval is required before ADFi can offer plan usage in this paid application. No password or API key is requested.";
+            }
+            else
+            {
+                var provider = new ChatGptMomentVqaProvider(
+                    chatGptProfiles,
+                    new ChatGptPlanResponsesClient(chatGptHttpClient!),
+                    TimeProvider.System);
+                var availability = await provider.GetAvailabilityAsync(cancellationToken).ConfigureAwait(true);
+                ProviderStatusText.Text = "ChatGPT: " + availability.AccessibleStatus;
+            }
         }
         else
         {
@@ -671,6 +793,28 @@ public partial class InteractiveVideoWindow : Window, IDisposable
         }
 
         await Task.CompletedTask;
+    }
+
+    private async Task RefreshChatGptProfilesAsync(CancellationToken cancellationToken)
+    {
+        var profiles = chatGptProfiles is null
+            ? []
+            : await chatGptProfiles.ListProfilesAsync(cancellationToken).ConfigureAwait(true);
+        var choices = profiles
+            .Select(item => new ChatGptProfileChoice(
+                item.ProfileId,
+                string.IsNullOrWhiteSpace(item.Email)
+                    ? item.DisplayName
+                    : $"{item.DisplayName} — {item.Email}",
+                item.IsSelected))
+            .ToArray();
+        ChatGptProfileComboBox.ItemsSource = choices;
+        ChatGptProfileComboBox.SelectedItem = choices.FirstOrDefault(item => item.IsSelected);
+        var enabled = featurePolicy.ChatGptPlanUsageIntegrationEnabled;
+        ChatGptProfileComboBox.IsEnabled = enabled && choices.Length > 1;
+        ContinueWithChatGptButton.IsEnabled = enabled;
+        DisconnectChatGptButton.IsEnabled = enabled && choices.Length > 0;
+        ManageChatGptUsageButton.IsEnabled = enabled && choices.Length > 0;
     }
 
     private async void PlaybackPositionSlider_OnPreviewMouseUp(object sender, MouseButtonEventArgs e) =>
@@ -829,6 +973,8 @@ public partial class InteractiveVideoWindow : Window, IDisposable
     }
 
     private sealed record ProviderChoice(VqaProviderKind Kind, string Label);
+
+    private sealed record ChatGptProfileChoice(string ProfileId, string Label, bool IsSelected);
 }
 
 internal static partial class WindowsDictationLauncher

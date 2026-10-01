@@ -46,6 +46,85 @@ public sealed class ChatGptAuthorizationTests
     }
 
     [Fact]
+    public void ReturningAuthorizationUsesRegisteredClientAndAccountHints()
+    {
+        var attempt = ChatGptAuthorization.CreateAttempt(
+            Guid.NewGuid(),
+            1455,
+            TimeProvider.System,
+            "oaiapp_registered") with
+        {
+            IdTokenHint = "signed.identity.token",
+            LoginHint = "listener@example.test",
+        };
+
+        var uri = ChatGptAuthorization.BuildAuthorizationUri(attempt);
+
+        Assert.Contains("client_id=oaiapp_registered", uri.Query, StringComparison.Ordinal);
+        Assert.Contains("id_token_hint=signed.identity.token", uri.Query, StringComparison.Ordinal);
+        Assert.Contains("login_hint=listener%40example.test", uri.Query, StringComparison.Ordinal);
+        Assert.DoesNotContain("agent_name_hint", uri.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProviderApprovalGatePreventsCredentialUse()
+    {
+        var store = new MemorySecretStore();
+        using var http = new HttpClient(new FailIfCalledHandler());
+        await using var service = new ChatGptProfileService(store, http, TimeProvider.System, false);
+
+        await service.InitializeAsync(TestContext.Current.CancellationToken);
+        var credential = await service.GetSelectedAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(credential);
+        Assert.Equal(VqaProviderAvailabilityState.ProviderApprovalRequired, service.ConnectionState);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SignInAsync(
+            _ => Task.CompletedTask,
+            TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ExpiredProfileRefreshesAndPersistsRotatedCredentials()
+    {
+        var store = new MemorySecretStore();
+        var initialVault = $$"""
+            {
+              "hostId": "{{Guid.NewGuid()}}",
+              "selectedProfileId": "subject-1",
+              "profiles": [{
+                "profileId": "subject-1",
+                "displayName": "Accessible Tester",
+                "email": "tester@example.test",
+                "clientId": "oaiapp_registered",
+                "accessToken": "expired-access",
+                "refreshToken": "old-refresh",
+                "idToken": "old-id-token",
+                "grantedScopes": ["{{ChatGptAuthorization.PlanUsageScope}}"],
+                "expiresAtUtc": "2000-01-01T00:00:00+00:00"
+              }]
+            }
+            """;
+        store.Value = Encoding.UTF8.GetBytes(initialVault);
+        var handler = new RefreshHandler();
+        using var http = new HttpClient(handler);
+        await using (var service = new ChatGptProfileService(store, http, TimeProvider.System, true))
+        {
+            var credential = await service.GetSelectedAsync(TestContext.Current.CancellationToken);
+
+            Assert.NotNull(credential);
+            Assert.Equal("rotated-access", credential.AccessToken);
+            Assert.Equal(VqaProviderAvailabilityState.PlanUsageAvailable, service.ConnectionState);
+        }
+
+        var persisted = Encoding.UTF8.GetString(store.Value!);
+        Assert.Contains("rotated-access", persisted, StringComparison.Ordinal);
+        Assert.Contains("rotated-refresh", persisted, StringComparison.Ordinal);
+        Assert.DoesNotContain("expired-access", persisted, StringComparison.Ordinal);
+        Assert.Contains("grant_type=refresh_token", handler.RequestBody, StringComparison.Ordinal);
+        Assert.Contains("resource=https%3A%2F%2Fapi.openai.com%2Fv1", handler.RequestBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PlanVqaUsesPublicResponsesWithStreamingAndNoStorage()
     {
         var image = Path.Combine(Path.GetTempPath(), $"adfi-chatgpt-{Guid.NewGuid():N}.png");
@@ -189,5 +268,53 @@ public sealed class ChatGptAuthorizationTests
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
         };
+    }
+
+    private sealed class MemorySecretStore : IProtectedSecretStore
+    {
+        public byte[]? Value { get; set; }
+
+        public Task SaveAsync(string key, ReadOnlyMemory<byte> secret, CancellationToken cancellationToken)
+        {
+            Value = secret.ToArray();
+            return Task.CompletedTask;
+        }
+
+        public Task<byte[]?> LoadAsync(string key, CancellationToken cancellationToken) =>
+            Task.FromResult(Value?.ToArray());
+
+        public Task DeleteAsync(string key, CancellationToken cancellationToken)
+        {
+            Value = null;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FailIfCalledHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("HTTP must not be called while the integration gate is disabled.");
+    }
+
+    private sealed class RefreshHandler : HttpMessageHandler
+    {
+        public string RequestBody { get; private set; } = string.Empty;
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Assert.Equal(ChatGptAuthorization.TokenEndpoint, request.RequestUri);
+            RequestBody = await request.Content!.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"access_token\":\"rotated-access\",\"refresh_token\":\"rotated-refresh\",\"scope\":\"chatgpt.tokens.use.direct\",\"expires_in\":3600}",
+                    Encoding.UTF8,
+                    "application/json"),
+            };
+        }
     }
 }

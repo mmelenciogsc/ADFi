@@ -79,6 +79,34 @@
                                    Text="Provider status has not been checked."
                                    TextWrapping="Wrap"
                                    AutomationProperties.Name="Question provider connection and usage status" />
+                        <Label Target="{Binding ElementName=ChatGptProfileComboBox}" Content="ChatGPT _profile" />
+                        <ComboBox x:Name="ChatGptProfileComboBox"
+                                  TabIndex="5"
+                                  MinWidth="300"
+                                  HorizontalAlignment="Left"
+                                  DisplayMemberPath="Label"
+                                  SelectionChanged="ChatGptProfileComboBox_OnSelectionChanged"
+                                  AutomationProperties.Name="Connected ChatGPT profile" />
+                        <WrapPanel Margin="0,6,0,4">
+                            <Button x:Name="ContinueWithChatGptButton"
+                                    Content="_Continue with ChatGPT"
+                                    TabIndex="6"
+                                    Click="ContinueWithChatGptButton_OnClick"
+                                    AutomationProperties.Name="Continue with ChatGPT in the system browser"
+                                    AutomationProperties.HelpText="ADFi never asks for your ChatGPT password or API key and cannot access prior conversations." />
+                            <Button x:Name="ManageChatGptUsageButton"
+                                    Content="_Manage usage"
+                                    TabIndex="7"
+                                    IsEnabled="False"
+                                    Click="ManageChatGptUsageButton_OnClick"
+                                    AutomationProperties.Name="Manage ChatGPT plan usage in the system browser" />
+                            <Button x:Name="DisconnectChatGptButton"
+                                    Content="_Disconnect ChatGPT"
+                                    TabIndex="8"
+                                    IsEnabled="False"
+                                    Click="DisconnectChatGptButton_OnClick"
+                                    AutomationProperties.Name="Disconnect the selected ChatGPT profile from ADFi" />
+                        </WrapPanel>
                         <TextBlock x:Name="CapturePolicyText"
                                    Margin="4"
                                    Text="YouTube visual capture policy has not been loaded."
@@ -87,12 +115,12 @@
                         <Expander Header="Advanced privacy" AutomationProperties.Name="Advanced privacy settings">
                             <StackPanel Margin="8">
                                 <Button Content="_Preview provider request"
-                                        TabIndex="5"
+                                        TabIndex="9"
                                         HorizontalAlignment="Left"
                                         Click="PreviewProviderRequestButton_OnClick"
                                         AutomationProperties.Name="Preview the data categories for a moment question provider request" />
                                 <TextBox x:Name="ProviderRequestPreviewTextBox"
-                                         TabIndex="6"
+                                         TabIndex="10"
                                          MinHeight="70"
                                          IsReadOnly="True"
                                          AcceptsReturn="True"
@@ -133,19 +161,19 @@
                         <WrapPanel Margin="0,8,0,0">
                             <Button x:Name="PlayButton"
                                     Content="_Play"
-                                    TabIndex="7"
+                                    TabIndex="11"
                                     IsEnabled="False"
                                     Click="PlayButton_OnClick"
                                     AutomationProperties.Name="Play video" />
                             <Button x:Name="PauseButton"
                                     Content="_Pause"
-                                    TabIndex="8"
+                                    TabIndex="12"
                                     IsEnabled="False"
                                     Click="PauseButton_OnClick"
                                     AutomationProperties.Name="Pause video" />
                             <Button x:Name="AskMomentButton"
                                     Content="Ask about this moment (Alt+Q)"
-                                    TabIndex="10"
+                                    TabIndex="14"
                                     IsEnabled="False"
                                     Click="AskMomentButton_OnClick"
                                     AutomationProperties.Name="Ask about this moment"
@@ -153,7 +181,7 @@
                         </WrapPanel>
                         <Label Target="{Binding ElementName=PlaybackPositionSlider}" Content="Playback _position" />
                         <Slider x:Name="PlaybackPositionSlider"
-                                TabIndex="9"
+                                TabIndex="13"
                                 Minimum="0"
                                 Maximum="1"
                                 Value="0"
@@ -180,27 +208,27 @@
                                    AutomationProperties.Name="Paused moment checkpoint" />
                         <Label Target="{Binding ElementName=MomentQuestionTextBox}" Content="Ask about this _moment" />
                         <TextBox x:Name="MomentQuestionTextBox"
-                                 TabIndex="11"
+                                 TabIndex="15"
                                  MinHeight="34"
                                  PreviewKeyDown="MomentQuestionTextBox_OnPreviewKeyDown"
                                  AutomationProperties.Name="Ask about this moment"
                                  AutomationProperties.HelpText="Type a question. Press Enter or Control plus Enter to submit. The next Tab target is DICTATE." />
                         <Button x:Name="DictateButton"
                                 Content="DICTATE"
-                                TabIndex="12"
+                                TabIndex="16"
                                 HorizontalAlignment="Left"
                                 Click="DictateButton_OnClick"
                                 AutomationProperties.Name="DICTATE question using Windows voice typing"
                                 AutomationProperties.HelpText="Opens Windows voice typing in the same Ask about this moment edit field." />
                         <Button x:Name="SubmitQuestionButton"
                                 Content="_Submit question"
-                                TabIndex="13"
+                                TabIndex="17"
                                 HorizontalAlignment="Left"
                                 Click="SubmitQuestionButton_OnClick"
                                 AutomationProperties.Name="Submit moment question" />
                         <Label Target="{Binding ElementName=AnswerTextBox}" Content="_Answer" />
                         <TextBox x:Name="AnswerTextBox"
-                                 TabIndex="14"
+                                 TabIndex="18"
                                  MinHeight="80"
                                  IsReadOnly="True"
                                  AcceptsReturn="True"
@@ -209,45 +237,45 @@
                                  AutomationProperties.Name="Moment question answer"
                                  AutomationProperties.LiveSetting="Off" />
                         <ListBox x:Name="QuestionHistoryList"
-                                 TabIndex="15"
+                                 TabIndex="19"
                                  MinHeight="70"
                                  MaxHeight="160"
                                  AutomationProperties.Name="Temporary textual viewing question and answer history"
                                  AutomationProperties.HelpText="This history contains text and lightweight moment references, never retained YouTube screenshots." />
                         <WrapPanel>
                             <Button Content="Ask _another question"
-                                    TabIndex="16"
+                                    TabIndex="20"
                                     Click="AskAnotherButton_OnClick"
                                     AutomationProperties.Name="Ask another question about the same paused moment" />
                             <Button x:Name="ResumeButton"
                                     Content="_Resume video"
-                                    TabIndex="17"
+                                    TabIndex="21"
                                     Click="ResumeButton_OnClick"
                                     AutomationProperties.Name="Resume video from paused moment" />
                             <Button x:Name="ReplayContextButton"
                                     Content="_Replay context"
-                                    TabIndex="18"
+                                    TabIndex="22"
                                     Click="ReplayContextButton_OnClick"
                                     AutomationProperties.Name="Replay a short allowed context around the paused moment" />
                             <Button x:Name="SuggestFeedbackButton"
                                     Content="Suggest correction or _feedback"
-                                    TabIndex="19"
+                                    TabIndex="23"
                                     IsEnabled="False"
                                     Click="SuggestFeedbackButton_OnClick"
                                     AutomationProperties.Name="Create an editable correction or feedback draft" />
                             <Button Content="_Close Q and A"
-                                    TabIndex="20"
+                                    TabIndex="24"
                                     Click="CloseQuestionButton_OnClick"
                                     AutomationProperties.Name="Close questions and return to the player without resuming" />
                             <Button Content="_Delete viewing Q and A history"
-                                    TabIndex="21"
+                                    TabIndex="25"
                                     Click="DeleteHistoryButton_OnClick"
                                     AutomationProperties.Name="Delete temporary viewing question and answer history" />
                         </WrapPanel>
                         <StackPanel x:Name="FeedbackDraftPanel" Visibility="Collapsed" Margin="0,8,0,0">
                             <Label Target="{Binding ElementName=FeedbackDraftTextBox}" Content="Correction or _feedback draft" />
                             <TextBox x:Name="FeedbackDraftTextBox"
-                                     TabIndex="22"
+                                     TabIndex="26"
                                      MinHeight="80"
                                      AcceptsReturn="True"
                                      TextWrapping="Wrap"
@@ -256,11 +284,11 @@
                                      AutomationProperties.HelpText="Review and edit this draft. Submission creates a pending feedback entry; it does not create earnings automatically." />
                             <WrapPanel>
                                 <Button Content="_Submit pending feedback"
-                                        TabIndex="23"
+                                        TabIndex="27"
                                         Click="SubmitFeedbackButton_OnClick"
                                         AutomationProperties.Name="Submit correction or feedback for review" />
                                 <Button Content="_Cancel feedback draft"
-                                        TabIndex="24"
+                                        TabIndex="28"
                                         Click="CancelFeedbackButton_OnClick"
                                         AutomationProperties.Name="Cancel correction or feedback draft" />
                             </WrapPanel>
@@ -270,7 +298,7 @@
 
                 <Button x:Name="AdfiThisVideoButton"
                         Content="ADFi this video — Creator feature"
-                        TabIndex="25"
+                        TabIndex="29"
                         Visibility="Collapsed"
                         HorizontalAlignment="Left"
                         Click="AdfiThisVideoButton_OnClick"
