@@ -107,3 +107,68 @@ public static class NarrationWindowPlanner
         return windows;
     }
 }
+
+public static class AudioTimelineComposer
+{
+    public static IReadOnlyList<SourceAudioInterval> Combine(
+        TimeSpan mediaDuration,
+        IReadOnlyList<SourceAudioInterval> signalTimeline,
+        IReadOnlyList<TranscriptSegment> transcript,
+        TimeSpan dialoguePadding)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(mediaDuration, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfLessThan(dialoguePadding, TimeSpan.Zero);
+        var dialogue = transcript
+            .Select(segment => new MediaInterval(
+                Max(TimeSpan.Zero, segment.SourceInterval.Start - dialoguePadding),
+                Min(mediaDuration, segment.SourceInterval.End + dialoguePadding)))
+            .ToArray();
+        var boundaries = new SortedSet<TimeSpan> { TimeSpan.Zero, mediaDuration };
+        foreach (var interval in signalTimeline.Select(item => item.Interval).Concat(dialogue))
+        {
+            interval.ValidateWithin(mediaDuration);
+            boundaries.Add(interval.Start);
+            boundaries.Add(interval.End);
+        }
+
+        var points = boundaries.ToArray();
+        var result = new List<SourceAudioInterval>();
+        for (var index = 0; index < points.Length - 1; index++)
+        {
+            var interval = new MediaInterval(points[index], points[index + 1]);
+            if (interval.Duration <= TimeSpan.Zero)
+            {
+                continue;
+            }
+
+            var kind = dialogue.Any(candidate => candidate.Overlaps(interval))
+                ? SourceAudioKind.Dialogue
+                : signalTimeline.Any(item => item.Kind == SourceAudioKind.QuietCandidate && item.Interval.Overlaps(interval))
+                    ? SourceAudioKind.QuietCandidate
+                    : SourceAudioKind.MeaningfulNonDialogue;
+            AppendOrMerge(result, new(
+                interval,
+                kind,
+                kind == SourceAudioKind.Dialogue ? 1m : 0.8m,
+                $"audio-combined-{index:D5}"));
+        }
+
+        return result;
+    }
+
+    private static void AppendOrMerge(List<SourceAudioInterval> result, SourceAudioInterval next)
+    {
+        if (result.Count > 0 && result[^1].Kind == next.Kind && result[^1].Interval.End == next.Interval.Start)
+        {
+            var prior = result[^1];
+            result[^1] = prior with { Interval = new(prior.Interval.Start, next.Interval.End) };
+            return;
+        }
+
+        result.Add(next);
+    }
+
+    private static TimeSpan Min(TimeSpan left, TimeSpan right) => left <= right ? left : right;
+
+    private static TimeSpan Max(TimeSpan left, TimeSpan right) => left >= right ? left : right;
+}

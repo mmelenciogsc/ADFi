@@ -86,6 +86,30 @@ public sealed class TimelineTests
         Assert.True(result.RequiresUserReview);
     }
 
+    [Fact]
+    public void TranscriptOverridesSignalSilenceAndPreservesMeaningfulSound()
+    {
+        var signal = new[]
+        {
+            Audio(SourceAudioKind.MeaningfulNonDialogue, 0, 2),
+            Audio(SourceAudioKind.QuietCandidate, 2, 8),
+            Audio(SourceAudioKind.MeaningfulNonDialogue, 8, 10),
+        };
+        var transcript = new[] { Segment("speech", "chunk-1", 3, 5, "He speaks.") };
+
+        var combined = AudioTimelineComposer.Combine(
+            TimeSpan.FromSeconds(10),
+            signal,
+            transcript,
+            TimeSpan.FromMilliseconds(250));
+
+        Assert.Equal(
+            [SourceAudioKind.MeaningfulNonDialogue, SourceAudioKind.QuietCandidate, SourceAudioKind.Dialogue, SourceAudioKind.QuietCandidate, SourceAudioKind.MeaningfulNonDialogue],
+            combined.Select(item => item.Kind));
+        Assert.Equal(TimeSpan.FromSeconds(2.75), combined[2].Interval.Start);
+        Assert.Equal(TimeSpan.FromSeconds(5.25), combined[2].Interval.End);
+    }
+
     private static TranscriptSegment Segment(string id, string chunk, double start, double end, string text) =>
         new(id, chunk, new(TimeSpan.FromSeconds(start), TimeSpan.FromSeconds(end)), text, 0.9m, []);
 
