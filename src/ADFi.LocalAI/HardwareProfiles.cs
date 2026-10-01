@@ -22,7 +22,9 @@ public sealed record HardwareProfile(
     long WorkingDiskFreeBytes,
     decimal MiniatureInferenceTokensPerSecond,
     decimal MiniatureTranscodeFramesPerSecond,
-    DateTimeOffset MeasuredAtUtc);
+    DateTimeOffset MeasuredAtUtc,
+    IReadOnlySet<string>? CpuFeatures = null,
+    IReadOnlyList<string>? Warnings = null);
 
 public sealed record ModelTier(
     string Name,
@@ -62,4 +64,3 @@ public interface IHardwareProfiler
     Task<(long FreeRamBytes, long FreeVramBytes)> GetCurrentFreeResourcesAsync(
         CancellationToken cancellationToken);
 }
-
