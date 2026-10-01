@@ -42,6 +42,41 @@ public sealed class RepositoryArchitectureTests
         }
     }
 
+    [Fact]
+    public void InitialPostgresMigrationContainsRequiredNormalizedDomains()
+    {
+        var sql = File.ReadAllText(RepositoryPath(
+            "src",
+            "ADFi.Infrastructure",
+            "Migrations",
+            "0001_initial.sql"));
+        var requiredTables = new[]
+        {
+            "users", "email_verification_tokens", "auth_sessions", "devices",
+            "subscription_plans", "subscriptions", "subscription_events", "projects",
+            "project_publications", "youtube_assets", "youtube_status_events",
+            "project_contributors", "contribution_events", "feedback_entries",
+            "referral_links", "referral_visits", "referral_relationships",
+            "qualified_downstream_actions", "playlists", "playlist_items",
+            "project_split_versions", "split_participants", "rights_interests",
+            "rights_claims", "economic_policy_versions", "revenue_periods",
+            "net_revenue_components", "economic_events", "member_earnings",
+            "wallets", "wallet_entries", "payout_requests", "payout_batches",
+            "moderation_reports", "moderation_actions", "audit_events",
+            "feature_configuration",
+        };
+
+        foreach (var table in requiredTables)
+        {
+            Assert.Contains($"CREATE TABLE {table} (", sql, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("('COMMUNITY', 'Community', 200, false, false, true)", sql, StringComparison.Ordinal);
+        Assert.Contains("('CREATOR', 'Creator', 900, true, true, true)", sql, StringComparison.Ordinal);
+        Assert.Contains("community_basis_points = 7000", sql, StringComparison.Ordinal);
+        Assert.Contains("adfi_basis_points = 3000", sql, StringComparison.Ordinal);
+    }
+
     private static string RepositoryPath(params string[] parts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
