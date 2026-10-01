@@ -17,6 +17,9 @@ public static class AccountEndpoints
         group.MapGet("/verify-email", VerifyEmailAsync).AllowAnonymous();
         group.MapPost("/login", LoginAsync).AllowAnonymous();
         group.MapPost("/logout", LogoutAsync).AllowAnonymous();
+        group.MapPost("/session/rotate", RotateSessionAsync).AllowAnonymous();
+        group.MapPost("/password-reset/request", RequestPasswordResetAsync).AllowAnonymous();
+        group.MapPost("/password-reset/complete", CompletePasswordResetAsync).AllowAnonymous();
         return group;
     }
 
@@ -116,6 +119,75 @@ public static class AccountEndpoints
         return Results.NoContent();
     }
 
+    private static async Task<IResult> RotateSessionAsync(
+        HttpRequest request,
+        AccountRepository accounts,
+        CancellationToken cancellationToken)
+    {
+        if (!TryReadBearer(request, out var token))
+        {
+            return Results.Unauthorized();
+        }
+
+        var rotated = await accounts.RotateSessionAsync(token, TimeSpan.FromDays(30), cancellationToken)
+            .ConfigureAwait(false);
+        return rotated is null ? Results.Unauthorized() : Results.Ok(rotated);
+    }
+
+    private static async Task<IResult> RequestPasswordResetAsync(
+        PasswordResetRequest request,
+        AccountRepository accounts,
+        IAccountEmailSender emailSender,
+        CancellationToken cancellationToken)
+    {
+        if (new EmailAddressAttribute().IsValid(request.Email))
+        {
+            var challenge = await accounts.CreatePasswordResetChallengeAsync(
+                request.Email,
+                TimeSpan.FromMinutes(30),
+                cancellationToken).ConfigureAwait(false);
+            if (challenge is not null)
+            {
+                await emailSender.SendPasswordResetAsync(
+                    challenge.Email,
+                    challenge.DisplayName,
+                    challenge.Token,
+                    cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return Results.Accepted(value: new
+        {
+            message = "If the address belongs to a verified account, a password-reset link has been sent.",
+        });
+    }
+
+    private static async Task<IResult> CompletePasswordResetAsync(
+        CompletePasswordResetRequest request,
+        AccountRepository accounts,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            PasswordCredentialHasher.ValidatePassword(request.NewPassword);
+        }
+        catch (ArgumentException exception)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                [nameof(request.NewPassword)] = [exception.Message],
+            });
+        }
+
+        var reset = await accounts.ResetPasswordAsync(
+            request.Token,
+            PasswordCredentialHasher.Hash(request.NewPassword),
+            cancellationToken).ConfigureAwait(false);
+        return reset
+            ? Results.Ok(new { message = "Password reset. Sign in again on every device." })
+            : Results.BadRequest(new { message = "The password-reset link is invalid or expired." });
+    }
+
     internal static Dictionary<string, string[]> ValidateRegistration(RegisterRequest request)
     {
         var errors = new Dictionary<string, string[]>(StringComparer.Ordinal);
@@ -170,3 +242,8 @@ public sealed record LoginRequest(
     [property: Required] string Password,
     [property: Required] string DeviceLabel);
 
+public sealed record PasswordResetRequest([property: Required, EmailAddress] string Email);
+
+public sealed record CompletePasswordResetRequest(
+    [property: Required] string Token,
+    [property: Required] string NewPassword);
