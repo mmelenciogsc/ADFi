@@ -23,7 +23,8 @@ PrivateDevices=true
 RestrictSUIDSGID=true
 RestrictNamespaces=true
 LockPersonality=true
-MemoryDenyWriteExecute=true
+# The .NET JIT requires executable memory; MemoryDenyWriteExecute would prevent startup.
+MemoryDenyWriteExecute=false
 ReadWritePaths=/var/lib/adfi
 UMask=0077
 
