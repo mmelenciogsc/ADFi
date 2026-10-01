@@ -12,8 +12,8 @@
     <Project Path="src/ADFi.YouTube/ADFi.YouTube.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/ADFi.Api.Tests/ADFi.Api.Tests.csproj" />
     <Project Path="tests/ADFi.Architecture.Tests/ADFi.Architecture.Tests.csproj" />
     <Project Path="tests/ADFi.Core.Tests/ADFi.Core.Tests.csproj" />
   </Folder>
 </Solution>
-
