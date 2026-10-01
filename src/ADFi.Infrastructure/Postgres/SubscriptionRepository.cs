@@ -33,6 +33,12 @@ public sealed class SubscriptionRepository(AdfiDatabase database, TimeProvider t
         command.Parameters.AddWithValue(providerSubscriptionId);
         command.Parameters.AddWithValue(timeProvider.GetUtcNow());
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+        // PayPal can deliver activation/payment webhooks before the browser approval flow has
+        // persisted its local subscription row. Re-evaluate those verified inbox records now.
+        await new PostgresPayPalWebhookEventStore(database, timeProvider)
+            .ReplayWaitingForSubscriptionAsync(providerSubscriptionId, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task<AccountEntitlement> GetEntitlementAsync(
@@ -123,7 +129,13 @@ public sealed class PostgresPayPalWebhookEventStore(
             if (status is not null)
             {
                 await UpdateSubscriptionStatusAsync(
-                    connection, transaction, subscriptionId.Value, status, webhookEvent, cancellationToken)
+                    connection,
+                    transaction,
+                    subscriptionId.Value,
+                    status,
+                    webhookEvent,
+                    timeProvider.GetUtcNow(),
+                    cancellationToken)
                     .ConfigureAwait(false);
             }
         }
@@ -136,6 +148,46 @@ public sealed class PostgresPayPalWebhookEventStore(
             webhookEvent.Effect == PayPalEventEffect.Unsupported ? "UNSUPPORTED_IGNORED" : null,
             cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<int> ReplayWaitingForSubscriptionAsync(
+        string providerSubscriptionId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerSubscriptionId);
+        var pending = new List<string>();
+        await using (var command = database.DataSource.CreateCommand(
+                         """
+                         SELECT payload_json::text
+                         FROM paypal_webhook_inbox
+                         WHERE provider_subscription_id = $1
+                           AND processing_status = 'WAITING_FOR_SUBSCRIPTION'
+                         ORDER BY provider_created_at_utc NULLS FIRST, received_at_utc, provider_event_id
+                         """))
+        {
+            command.Parameters.AddWithValue(providerSubscriptionId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                pending.Add(reader.GetString(0));
+            }
+        }
+
+        foreach (var rawJson in pending)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var webhookEvent = PayPalWebhookEventParser.Parse(rawJson);
+            if (!string.Equals(webhookEvent.SubscriptionId, providerSubscriptionId, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("Stored PayPal webhook subscription identity changed during replay.");
+            }
+
+            // Signature verification happened before the immutable payload entered this inbox.
+            // ApplyAsync remains timestamp-monotonic and idempotent at the event/status rows.
+            await ApplyAsync(webhookEvent, cancellationToken).ConfigureAwait(false);
+        }
+
+        return pending.Count;
     }
 
     public async Task MarkFailedAsync(
@@ -207,9 +259,10 @@ public sealed class PostgresPayPalWebhookEventStore(
         Guid subscriptionId,
         string status,
         PayPalEventEnvelope webhookEvent,
+        DateTimeOffset receivedAtUtc,
         CancellationToken cancellationToken)
     {
-        var effectiveAt = webhookEvent.ProviderCreatedAtUtc ?? DateTimeOffset.UtcNow;
+        var effectiveAt = webhookEvent.ProviderCreatedAtUtc ?? receivedAtUtc;
         await using var command = new NpgsqlCommand(
             """
             UPDATE subscriptions
