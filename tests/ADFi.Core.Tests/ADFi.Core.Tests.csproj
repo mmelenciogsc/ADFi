@@ -16,6 +16,7 @@
     <ProjectReference Include="../../src/ADFi.Conversation/ADFi.Conversation.csproj" />
     <ProjectReference Include="../../src/ADFi.Core/ADFi.Core.csproj" />
     <ProjectReference Include="../../src/ADFi.Economics/ADFi.Economics.csproj" />
+    <ProjectReference Include="../../src/ADFi.Infrastructure/ADFi.Infrastructure.csproj" />
     <ProjectReference Include="../../src/ADFi.LocalAI/ADFi.LocalAI.csproj" />
     <ProjectReference Include="../../src/ADFi.Media/ADFi.Media.csproj" />
   </ItemGroup>
