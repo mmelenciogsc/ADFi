@@ -41,7 +41,8 @@ public static class ModelTierPolicy
     public static IReadOnlyList<ModelTier> Tiers { get; } =
     [
         new("Large", "qwen3-vl:8b", Gibibytes(12), Gibibytes(12), 1344, 5),
-        new("Balanced", BalancedQwen3Vl4B, Gibibytes(8), Gibibytes(8), 1024, 3),
+        // Consumer "8 GB" GPUs commonly report a few MiB below exactly 8 GiB.
+        new("Balanced", BalancedQwen3Vl4B, Gibibytes(8), Mebibytes(7_500), 1024, 3),
         new("Constrained", "qwen3-vl:2b", Gibibytes(4), 0, 768, 3),
     ];
 
@@ -55,6 +56,8 @@ public static class ModelTierPolicy
     }
 
     private static long Gibibytes(int value) => value * 1024L * 1024L * 1024L;
+
+    private static long Mebibytes(int value) => value * 1024L * 1024L;
 }
 
 public interface IHardwareProfiler

@@ -19,6 +19,14 @@ public sealed class ModelTierTests
         Assert.Equal("Constrained", selected.Name);
     }
 
+    [Fact]
+    public void ConsumerEightGigabyteGpuReportingSlightlyUnderEightGibSelectsBalanced()
+    {
+        var profile = Profile(8, 0) with { DedicatedVideoMemoryBytes = 8_188L * 1024 * 1024 };
+        var selected = ModelTierPolicy.Select(profile);
+        Assert.Equal("Balanced", selected.Name);
+    }
+
     private static HardwareProfile Profile(int freeRamGib, int vramGib) => new(
         "X64",
         8,
@@ -34,4 +42,3 @@ public sealed class ModelTierTests
         0,
         DateTimeOffset.UnixEpoch);
 }
-
