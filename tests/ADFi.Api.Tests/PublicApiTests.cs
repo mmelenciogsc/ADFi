@@ -56,4 +56,18 @@ public sealed class PublicApiTests : IClassFixture<WebApplicationFactory<Program
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
+
+    [Fact]
+    public async Task PublicDiscoverHtmlUsesAccessibleLandmarksWithoutLogin()
+    {
+        using var response = await client.GetAsync(
+            "/discover",
+            TestContext.Current.CancellationToken);
+        var html = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("<main id=\"main\">", html, StringComparison.Ordinal);
+        Assert.Contains("<h1>DISCOVER</h1>", html, StringComparison.Ordinal);
+        Assert.Contains("No eligible public ADFied works", html, StringComparison.Ordinal);
+    }
 }

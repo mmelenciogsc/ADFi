@@ -6,6 +6,6 @@
     <ProjectReference Include="../ADFi.Core/ADFi.Core.csproj" />
     <ProjectReference Include="../ADFi.Economics/ADFi.Economics.csproj" />
     <ProjectReference Include="../ADFi.Infrastructure/ADFi.Infrastructure.csproj" />
+    <ProjectReference Include="../ADFi.Web/ADFi.Web.csproj" />
   </ItemGroup>
 </Project>
-

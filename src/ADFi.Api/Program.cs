@@ -2,6 +2,7 @@ using ADFi.Api;
 using ADFi.Core;
 using ADFi.Infrastructure.Notifications;
 using ADFi.Infrastructure.Postgres;
+using ADFi.Web;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -64,6 +65,11 @@ app.MapGet("/api/v1/plans", () => Results.Ok(PlanCatalog.PaidPlans))
     .RequireRateLimiting("public")
     .AllowAnonymous();
 app.MapGet("/api/v1/discover", () => Results.Ok(Array.Empty<object>()))
+    .RequireRateLimiting("public")
+    .AllowAnonymous();
+app.MapGet("/discover", () => Results.Content(
+        DiscoverHtmlRenderer.RenderIndex([]),
+        "text/html; charset=utf-8"))
     .RequireRateLimiting("public")
     .AllowAnonymous();
 
