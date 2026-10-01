@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using ADFi.Core;
 using ADFi.Media;
+using ADFi.Infrastructure;
 
 namespace ADFi.Core.Tests;
 
@@ -97,6 +98,30 @@ public sealed class PhaseZeroIntegrationTests
             Assert.True(render.VideoStreamCopied);
             Assert.Equal(64, render.Sha256.Length);
             Assert.True(File.Exists(outputPath));
+            Assert.Equal(before, await File.ReadAllBytesAsync(sourcePath, cancellationToken));
+
+            var checkpointStore = new FilePipelineCheckpointStore(projectPath);
+            var preview = await new PreviewAssemblyService(
+                renderer,
+                "ffmpeg",
+                checkpointStore,
+                TimeProvider.System).AssembleAsync(
+                new(
+                    result.Attestation.ProjectId,
+                    projectPath,
+                    sourcePath,
+                    result.Source.Probe,
+                    [new("ad-1", narrationPath, new(TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(800)), TimeSpan.FromMilliseconds(250))],
+                    new(TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(900))),
+                cancellationToken);
+
+            Assert.Equal("REVIEW_IN_PROGRESS", preview.ReviewState);
+            Assert.True(File.Exists(preview.FullDraftPath));
+            Assert.True(File.Exists(preview.FocusPreviewPath));
+            Assert.Equal(AdficationPhase.InitialPreviewAssembly, preview.Checkpoint.Phase);
+            Assert.Contains(
+                await checkpointStore.LoadAsync(result.Attestation.ProjectId, cancellationToken),
+                item => item.Phase == AdficationPhase.InitialPreviewAssembly);
             Assert.Equal(before, await File.ReadAllBytesAsync(sourcePath, cancellationToken));
         }
         finally

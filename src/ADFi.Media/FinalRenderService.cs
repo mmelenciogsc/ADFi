@@ -81,7 +81,13 @@ public sealed class FinalRenderService(string ffmpegPath, IMediaProbe mediaProbe
                 ]);
             }
 
-            arguments.AddRange(["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", temporaryOutput]);
+            // Pin the mux to the immutable source duration. `-shortest` can truncate a valid
+            // source video at an AAC packet boundary when the newly mixed audio ends first.
+            arguments.AddRange(
+            [
+                "-c:a", "aac", "-b:a", "192k", "-t", Format(request.SourceProbe.Duration),
+                "-movflags", "+faststart", temporaryOutput,
+            ]);
             await RunRequiredAsync(arguments, "FINAL_RENDER_FAILED", cancellationToken).ConfigureAwait(false);
             File.Move(temporaryOutput, outputPath, true);
             var outputProbe = await mediaProbe.ProbeAsync(outputPath, cancellationToken).ConfigureAwait(false);
