@@ -63,6 +63,23 @@ public sealed class PhaseZeroIntegrationTests
             Assert.NotEmpty(frameCandidates);
             Assert.Equal(TimeSpan.Zero, frameCandidates[0].SourceTime);
             Assert.True(frameCandidates.Count <= 5);
+
+            var narrationPath = Path.Combine(testRoot, "narration.wav");
+            await GenerateNarrationFixtureAsync(narrationPath);
+            var outputPath = Path.Combine(testRoot, "adfied.mp4");
+            var renderer = new FinalRenderService("ffmpeg", new FfprobeMediaProbe());
+            var render = await renderer.RenderAsync(
+                new(
+                    sourcePath,
+                    result.Source.Probe,
+                    [new("ad-1", narrationPath, new(TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(800)), TimeSpan.FromMilliseconds(250))],
+                    outputPath),
+                cancellationToken);
+
+            Assert.True(render.VideoStreamCopied);
+            Assert.Equal(64, render.Sha256.Length);
+            Assert.True(File.Exists(outputPath));
+            Assert.Equal(before, await File.ReadAllBytesAsync(sourcePath, cancellationToken));
         }
         finally
         {
@@ -95,6 +112,33 @@ public sealed class PhaseZeroIntegrationTests
 
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("FFmpeg could not be started for the integration fixture.");
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var error = await process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        Assert.True(process.ExitCode == 0, error);
+    }
+
+    private static async Task GenerateNarrationFixtureAsync(string path)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "ffmpeg",
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in new[]
+                 {
+                     "-hide_banner", "-loglevel", "error", "-y",
+                     "-f", "lavfi", "-i", "sine=frequency=700:duration=0.25",
+                     "-c:a", "pcm_s16le", path,
+                 })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("FFmpeg could not generate the narration fixture.");
         var cancellationToken = TestContext.Current.CancellationToken;
         var error = await process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
