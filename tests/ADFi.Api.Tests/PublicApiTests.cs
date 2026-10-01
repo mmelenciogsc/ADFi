@@ -46,6 +46,21 @@ public sealed class PublicApiTests : IClassFixture<WebApplicationFactory<Program
         Assert.NotNull(plans);
         Assert.Equal([SubscriptionPlan.Community, SubscriptionPlan.Creator], plans.Select(plan => plan.Plan));
         Assert.Equal([200, 900], plans.Select(plan => plan.MonthlyPriceUsdCents));
+        Assert.All(plans, plan => Assert.True(plan.CanWatchAndAsk));
+    }
+
+    [Fact]
+    public async Task YoutubeAccessibilityCaptureDefaultsOffWithoutServerApproval()
+    {
+        var policy = await client.GetFromJsonAsync<ViewerVqaFeaturePolicy>(
+            "/api/v1/features/viewer-vqa",
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(policy);
+        Assert.False(policy.ChatGptPlanUsageIntegrationEnabled);
+        Assert.False(policy.YoutubeEphemeralAccessibilityCaptureEnabled);
+        Assert.InRange(policy.MaximumCaptureCount, 1, 3);
+        Assert.Contains("disabled", policy.AccessibilityStatus, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

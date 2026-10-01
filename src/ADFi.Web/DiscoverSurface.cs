@@ -6,7 +6,8 @@ public sealed record DiscoverSurface(
     string YouTubeVideoId,
     string AccessibilitySummary,
     string Attribution,
-    Uri CanonicalAdfiUrl);
+    Uri CanonicalAdfiUrl,
+    string? PublicationId = null);
 
 public static class DiscoverSharingPolicy
 {

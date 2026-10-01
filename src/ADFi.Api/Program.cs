@@ -38,6 +38,8 @@ if (persistenceConfigured)
     builder.Services.AddSingleton(new AdfiDatabase(connectionString!));
     builder.Services.AddSingleton<AccountRepository>();
     builder.Services.AddSingleton<SubscriptionRepository>();
+    builder.Services.AddSingleton<FeatureConfigurationRepository>();
+    builder.Services.AddSingleton<DiscoverFeedbackRepository>();
     if (publicBaseConfigured)
     {
         builder.Services.AddSingleton(services => new DiscoverRepository(
@@ -138,12 +140,90 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check 
 app.MapGet("/api/v1/plans", () => Results.Ok(PlanCatalog.PaidPlans))
     .RequireRateLimiting("public")
     .AllowAnonymous();
+app.MapGet("/api/v1/features/viewer-vqa", async (
+        IServiceProvider services,
+        IConfiguration configuration,
+        CancellationToken cancellationToken) =>
+    {
+        var enabled = configuration.GetValue("ViewerVqa:YoutubeEphemeralAccessibilityCaptureEnabled", false);
+        var chatGptEnabled = configuration.GetValue("ViewerVqa:ChatGptPlanUsageIntegrationEnabled", false);
+        var repository = services.GetService<FeatureConfigurationRepository>();
+        if (repository is not null)
+        {
+            enabled = await repository.GetBooleanAsync(
+                    "YoutubeEphemeralAccessibilityCaptureEnabled",
+                    cancellationToken)
+                .ConfigureAwait(false) ?? enabled;
+            chatGptEnabled = await repository.GetBooleanAsync(
+                    "ChatGptPlanUsageIntegrationEnabled",
+                    cancellationToken)
+                .ConfigureAwait(false) ?? chatGptEnabled;
+        }
+
+        var limits = MomentEvidenceLimits.Default;
+        return Results.Ok(new ViewerVqaFeaturePolicy(
+            chatGptEnabled,
+            enabled,
+            limits.MaximumImageCount,
+            limits.MaximumTemporalSpanMs,
+            limits.MaximumImageDimension,
+            120,
+            enabled
+                ? "Approved ephemeral YouTube accessibility capture is enabled."
+                : "YouTube visual evidence capture is disabled pending compliance approval. Playback and Ask remain available."));
+    })
+    .RequireRateLimiting("public")
+    .AllowAnonymous();
 if (persistenceConfigured && publicBaseConfigured)
 {
     app.MapGet("/api/v1/discover", async (
             DiscoverRepository repository,
             CancellationToken cancellationToken) =>
         Results.Ok(await repository.ListAsync(50, cancellationToken).ConfigureAwait(false)))
+        .RequireRateLimiting("public")
+        .AllowAnonymous();
+    app.MapGet("/api/v1/discover/{projectId:guid}/moment-context", async (
+            Guid projectId,
+            long timestampMs,
+            DiscoverRepository repository,
+            CancellationToken cancellationToken) =>
+        {
+            if (timestampMs < 0)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    [nameof(timestampMs)] = ["Timestamp must be nonnegative."],
+                });
+            }
+
+            var context = await repository.ResolveMomentContextAsync(
+                projectId,
+                timestampMs,
+                cancellationToken).ConfigureAwait(false);
+            return context is null ? Results.NotFound() : Results.Ok(context);
+        })
+        .RequireRateLimiting("public")
+        .AllowAnonymous();
+    app.MapGet("/api/v1/discover/by-youtube/{videoId}/moment-context", async (
+            string videoId,
+            long timestampMs,
+            DiscoverRepository repository,
+            CancellationToken cancellationToken) =>
+        {
+            if (timestampMs < 0 || !YoutubeVideoUrl.TryParseVideoId(videoId, out var normalized))
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    [nameof(timestampMs)] = ["A valid video ID and nonnegative timestamp are required."],
+                });
+            }
+
+            var context = await repository.ResolveMomentContextByYouTubeIdAsync(
+                normalized,
+                timestampMs,
+                cancellationToken).ConfigureAwait(false);
+            return context is null ? Results.NotFound() : Results.Ok(context);
+        })
         .RequireRateLimiting("public")
         .AllowAnonymous();
     app.MapGet("/discover", async (
@@ -169,6 +249,16 @@ else
             statusCode: StatusCodes.Status503ServiceUnavailable))
         .RequireRateLimiting("public")
         .AllowAnonymous();
+    app.MapGet("/api/v1/discover/{projectId:guid}/moment-context", () => Results.Problem(
+            "DISCOVER moment evidence is unavailable until PostgreSQL and PublicBaseUrl are configured.",
+            statusCode: StatusCodes.Status503ServiceUnavailable))
+        .RequireRateLimiting("public")
+        .AllowAnonymous();
+    app.MapGet("/api/v1/discover/by-youtube/{videoId}/moment-context", () => Results.Problem(
+            "DISCOVER moment evidence is unavailable until PostgreSQL and PublicBaseUrl are configured.",
+            statusCode: StatusCodes.Status503ServiceUnavailable))
+        .RequireRateLimiting("public")
+        .AllowAnonymous();
 }
 
 if (registrationConfigured)
@@ -183,6 +273,19 @@ else
             () => Results.Problem(
                 "Account services are unavailable until PostgreSQL and SMTP are configured.",
                 statusCode: StatusCodes.Status503ServiceUnavailable))
+        .RequireRateLimiting("authentication")
+        .AllowAnonymous();
+}
+
+if (persistenceConfigured)
+{
+    app.MapViewerFeedbackEndpoints();
+}
+else
+{
+    app.MapPost("/api/v1/discover/{projectId:guid}/feedback", () => Results.Problem(
+            "Feedback is unavailable until PostgreSQL is configured.",
+            statusCode: StatusCodes.Status503ServiceUnavailable))
         .RequireRateLimiting("authentication")
         .AllowAnonymous();
 }
