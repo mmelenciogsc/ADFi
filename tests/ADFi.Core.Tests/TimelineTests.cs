@@ -87,6 +87,15 @@ public sealed class TimelineTests
     }
 
     [Fact]
+    public void SpeechEstimateUsesConfiguredPlanningRate()
+    {
+        var text = string.Join(' ', Enumerable.Repeat("word", 18));
+        Assert.Equal(
+            TimeSpan.FromSeconds(6),
+            NarrationTimingPolicy.EstimateSpeechDuration(text));
+    }
+
+    [Fact]
     public void TranscriptOverridesSignalSilenceAndPreservesMeaningfulSound()
     {
         var signal = new[]

@@ -11,6 +11,21 @@ public sealed record NarrationFitResult(
 public static class NarrationTimingPolicy
 {
     public const int MaximumAutoFitAttempts = 3;
+    public const int DefaultPlanningWordsPerMinute = 180;
+
+    public static TimeSpan EstimateSpeechDuration(
+        string text,
+        int wordsPerMinute = DefaultPlanningWordsPerMinute)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        if (wordsPerMinute is < 80 or > 500)
+        {
+            throw new ArgumentOutOfRangeException(nameof(wordsPerMinute));
+        }
+
+        var words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        return TimeSpan.FromMinutes(words / (double)wordsPerMinute);
+    }
 
     public static NarrationFitResult Evaluate(
         TimeSpan renderedDuration,
