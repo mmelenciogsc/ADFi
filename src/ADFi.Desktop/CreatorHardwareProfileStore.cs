@@ -15,6 +15,20 @@ public sealed class CreatorHardwareProfileStore(string profileDirectory, string 
 
     public bool HasProfile => File.Exists(profilePath);
 
+    public async Task<CreatorHardwareAssessment?> LoadAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(profilePath))
+        {
+            return null;
+        }
+
+        await using var existing = File.OpenRead(profilePath);
+        return await JsonSerializer.DeserializeAsync<CreatorHardwareAssessment>(
+            existing,
+            JsonOptions,
+            cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<CreatorHardwareAssessment> GetOrMeasureAsync(
         bool force,
         CancellationToken cancellationToken)

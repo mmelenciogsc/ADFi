@@ -1,0 +1,282 @@
+<Window x:Class="ADFi.Desktop.InteractiveVideoWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="Accessible Interactive Video Viewer — ADFi"
+        Width="1050"
+        Height="850"
+        MinWidth="760"
+        MinHeight="620"
+        WindowStartupLocation="CenterOwner"
+        Loaded="Window_OnLoaded"
+        Closing="Window_OnClosing"
+        PreviewKeyDown="Window_OnPreviewKeyDown"
+        AutomationProperties.Name="ADFi Accessible Interactive Video Viewer">
+    <DockPanel Margin="16">
+        <StatusBar DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <TextBlock x:Name="ViewerStatusText"
+                       Text="Viewer starting."
+                       TextWrapping="Wrap"
+                       AutomationProperties.Name="Interactive viewer status"
+                       AutomationProperties.LiveSetting="Polite" />
+        </StatusBar>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
+            <StackPanel MaxWidth="980" HorizontalAlignment="Left">
+                <TextBlock Text="Pause. Ask. Know. Resume."
+                           FontSize="26"
+                           FontWeight="Bold"
+                           AutomationProperties.HeadingLevel="Level1" />
+                <TextBlock x:Name="ViewerModeText"
+                           Margin="0,4,0,12"
+                           Text="Viewer — questions do not change this project."
+                           TextWrapping="Wrap"
+                           AutomationProperties.Name="Viewer mode" />
+
+                <GroupBox Header="Open Video" Margin="0,0,0,10">
+                    <StackPanel Margin="8">
+                        <Button x:Name="OpenLocalVideoButton"
+                                Content="Open _local video file"
+                                TabIndex="1"
+                                HorizontalAlignment="Left"
+                                Click="OpenLocalVideoButton_OnClick"
+                                AutomationProperties.Name="Open local video file for accessible playback and questions"
+                                AutomationProperties.HelpText="Viewing does not start ADFication and does not upload the local file." />
+                        <Label Target="{Binding ElementName=YouTubeUrlTextBox}"
+                               Content="Paste _YouTube URL" />
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Right"
+                                    Content="_Load official YouTube player"
+                                    TabIndex="3"
+                                    Click="LoadYouTubeButton_OnClick"
+                                    AutomationProperties.Name="Load YouTube URL in the official embedded player" />
+                            <TextBox x:Name="YouTubeUrlTextBox"
+                                     TabIndex="2"
+                                     MinWidth="520"
+                                     AutomationProperties.Name="YouTube URL"
+                                     AutomationProperties.HelpText="ADFi parses only the video ID and uses the official YouTube embedded player. It does not download the video." />
+                        </DockPanel>
+                        <TextBlock x:Name="OpenSourceStatusText"
+                                   Margin="4,8,4,0"
+                                   Text="No video is loaded."
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.Name="Loaded video source" />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Header="Question provider" Margin="0,0,0,10">
+                    <StackPanel Margin="8">
+                        <Label Target="{Binding ElementName=ProviderComboBox}" Content="_Provider preference" />
+                        <ComboBox x:Name="ProviderComboBox"
+                                  TabIndex="4"
+                                  MinWidth="300"
+                                  HorizontalAlignment="Left"
+                                  DisplayMemberPath="Label"
+                                  SelectionChanged="ProviderComboBox_OnSelectionChanged"
+                                  AutomationProperties.Name="Moment question provider preference" />
+                        <TextBlock x:Name="ProviderStatusText"
+                                   Margin="4"
+                                   Text="Provider status has not been checked."
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.Name="Question provider connection and usage status" />
+                        <TextBlock x:Name="CapturePolicyText"
+                                   Margin="4"
+                                   Text="YouTube visual capture policy has not been loaded."
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.Name="YouTube accessibility capture compliance status" />
+                        <Expander Header="Advanced privacy" AutomationProperties.Name="Advanced privacy settings">
+                            <StackPanel Margin="8">
+                                <Button Content="_Preview provider request"
+                                        TabIndex="5"
+                                        HorizontalAlignment="Left"
+                                        Click="PreviewProviderRequestButton_OnClick"
+                                        AutomationProperties.Name="Preview the data categories for a moment question provider request" />
+                                <TextBox x:Name="ProviderRequestPreviewTextBox"
+                                         TabIndex="6"
+                                         MinHeight="70"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         AutomationProperties.Name="Provider request privacy preview" />
+                            </StackPanel>
+                        </Expander>
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Header="Video player" Margin="0,0,0,10">
+                    <StackPanel Margin="8">
+                        <Grid Height="430" Background="Black">
+                            <TextBlock x:Name="PlayerPlaceholder"
+                                       Text="Open a local video file or paste a YouTube URL."
+                                       Foreground="White"
+                                       FontSize="20"
+                                       TextWrapping="Wrap"
+                                       TextAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       HorizontalAlignment="Center"
+                                       AutomationProperties.Name="No video loaded" />
+                            <MediaElement x:Name="LocalMediaPlayer"
+                                          Visibility="Collapsed"
+                                          LoadedBehavior="Manual"
+                                          UnloadedBehavior="Manual"
+                                          ScrubbingEnabled="True"
+                                          Stretch="Uniform"
+                                          MediaOpened="LocalMediaPlayer_OnMediaOpened"
+                                          MediaEnded="LocalMediaPlayer_OnMediaEnded"
+                                          MediaFailed="LocalMediaPlayer_OnMediaFailed" />
+                            <wv2:WebView2 x:Name="YouTubePlayer"
+                                         Visibility="Collapsed"
+                                         Focusable="True"
+                                         AutomationProperties.Name="Official YouTube embedded video player"
+                                         AutomationProperties.HelpText="Normal YouTube controls and keyboard behavior remain available." />
+                        </Grid>
+                        <WrapPanel Margin="0,8,0,0">
+                            <Button x:Name="PlayButton"
+                                    Content="_Play"
+                                    TabIndex="7"
+                                    IsEnabled="False"
+                                    Click="PlayButton_OnClick"
+                                    AutomationProperties.Name="Play video" />
+                            <Button x:Name="PauseButton"
+                                    Content="_Pause"
+                                    TabIndex="8"
+                                    IsEnabled="False"
+                                    Click="PauseButton_OnClick"
+                                    AutomationProperties.Name="Pause video" />
+                            <Button x:Name="AskMomentButton"
+                                    Content="Ask about this moment (Alt+Q)"
+                                    TabIndex="10"
+                                    IsEnabled="False"
+                                    Click="AskMomentButton_OnClick"
+                                    AutomationProperties.Name="Ask about this moment"
+                                    AutomationProperties.HelpText="Pauses at the current time, then moves focus to the question field. Shortcut Alt plus Q." />
+                        </WrapPanel>
+                        <Label Target="{Binding ElementName=PlaybackPositionSlider}" Content="Playback _position" />
+                        <Slider x:Name="PlaybackPositionSlider"
+                                TabIndex="9"
+                                Minimum="0"
+                                Maximum="1"
+                                Value="0"
+                                IsEnabled="False"
+                                IsMoveToPointEnabled="True"
+                                PreviewMouseUp="PlaybackPositionSlider_OnPreviewMouseUp"
+                                KeyUp="PlaybackPositionSlider_OnKeyUp"
+                                AutomationProperties.Name="Video playback position" />
+                        <TextBlock x:Name="PlaybackPositionText"
+                                   Text="Position 00:00 of unknown duration."
+                                   AutomationProperties.Name="Video playback position status" />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox x:Name="QuestionGroup"
+                          Header="Ask about this moment"
+                          Visibility="Collapsed"
+                          Margin="0,0,0,10">
+                    <StackPanel Margin="8">
+                        <TextBlock x:Name="PausedMomentText"
+                                   FontWeight="SemiBold"
+                                   Text="Paused moment has not been captured."
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.Name="Paused moment checkpoint" />
+                        <Label Target="{Binding ElementName=MomentQuestionTextBox}" Content="Ask about this _moment" />
+                        <TextBox x:Name="MomentQuestionTextBox"
+                                 TabIndex="11"
+                                 MinHeight="34"
+                                 PreviewKeyDown="MomentQuestionTextBox_OnPreviewKeyDown"
+                                 AutomationProperties.Name="Ask about this moment"
+                                 AutomationProperties.HelpText="Type a question. Press Enter or Control plus Enter to submit. The next Tab target is DICTATE." />
+                        <Button x:Name="DictateButton"
+                                Content="DICTATE"
+                                TabIndex="12"
+                                HorizontalAlignment="Left"
+                                Click="DictateButton_OnClick"
+                                AutomationProperties.Name="DICTATE question using Windows voice typing"
+                                AutomationProperties.HelpText="Opens Windows voice typing in the same Ask about this moment edit field." />
+                        <Button x:Name="SubmitQuestionButton"
+                                Content="_Submit question"
+                                TabIndex="13"
+                                HorizontalAlignment="Left"
+                                Click="SubmitQuestionButton_OnClick"
+                                AutomationProperties.Name="Submit moment question" />
+                        <Label Target="{Binding ElementName=AnswerTextBox}" Content="_Answer" />
+                        <TextBox x:Name="AnswerTextBox"
+                                 TabIndex="14"
+                                 MinHeight="80"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 AutomationProperties.Name="Moment question answer"
+                                 AutomationProperties.LiveSetting="Off" />
+                        <ListBox x:Name="QuestionHistoryList"
+                                 TabIndex="15"
+                                 MinHeight="70"
+                                 MaxHeight="160"
+                                 AutomationProperties.Name="Temporary textual viewing question and answer history"
+                                 AutomationProperties.HelpText="This history contains text and lightweight moment references, never retained YouTube screenshots." />
+                        <WrapPanel>
+                            <Button Content="Ask _another question"
+                                    TabIndex="16"
+                                    Click="AskAnotherButton_OnClick"
+                                    AutomationProperties.Name="Ask another question about the same paused moment" />
+                            <Button x:Name="ResumeButton"
+                                    Content="_Resume video"
+                                    TabIndex="17"
+                                    Click="ResumeButton_OnClick"
+                                    AutomationProperties.Name="Resume video from paused moment" />
+                            <Button x:Name="ReplayContextButton"
+                                    Content="_Replay context"
+                                    TabIndex="18"
+                                    Click="ReplayContextButton_OnClick"
+                                    AutomationProperties.Name="Replay a short allowed context around the paused moment" />
+                            <Button x:Name="SuggestFeedbackButton"
+                                    Content="Suggest correction or _feedback"
+                                    TabIndex="19"
+                                    IsEnabled="False"
+                                    Click="SuggestFeedbackButton_OnClick"
+                                    AutomationProperties.Name="Create an editable correction or feedback draft" />
+                            <Button Content="_Close Q and A"
+                                    TabIndex="20"
+                                    Click="CloseQuestionButton_OnClick"
+                                    AutomationProperties.Name="Close questions and return to the player without resuming" />
+                            <Button Content="_Delete viewing Q and A history"
+                                    TabIndex="21"
+                                    Click="DeleteHistoryButton_OnClick"
+                                    AutomationProperties.Name="Delete temporary viewing question and answer history" />
+                        </WrapPanel>
+                        <StackPanel x:Name="FeedbackDraftPanel" Visibility="Collapsed" Margin="0,8,0,0">
+                            <Label Target="{Binding ElementName=FeedbackDraftTextBox}" Content="Correction or _feedback draft" />
+                            <TextBox x:Name="FeedbackDraftTextBox"
+                                     TabIndex="22"
+                                     MinHeight="80"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     AutomationProperties.Name="Editable correction or feedback draft"
+                                     AutomationProperties.HelpText="Review and edit this draft. Submission creates a pending feedback entry; it does not create earnings automatically." />
+                            <WrapPanel>
+                                <Button Content="_Submit pending feedback"
+                                        TabIndex="23"
+                                        Click="SubmitFeedbackButton_OnClick"
+                                        AutomationProperties.Name="Submit correction or feedback for review" />
+                                <Button Content="_Cancel feedback draft"
+                                        TabIndex="24"
+                                        Click="CancelFeedbackButton_OnClick"
+                                        AutomationProperties.Name="Cancel correction or feedback draft" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </StackPanel>
+                </GroupBox>
+
+                <Button x:Name="AdfiThisVideoButton"
+                        Content="ADFi this video — Creator feature"
+                        TabIndex="25"
+                        Visibility="Collapsed"
+                        HorizontalAlignment="Left"
+                        Click="AdfiThisVideoButton_OnClick"
+                        AutomationProperties.Name="ADFi this local video, Creator feature"
+                        AutomationProperties.HelpText="Community subscribers are routed to upgrade. Creator ADFication still requires rights confirmation and a local source file." />
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

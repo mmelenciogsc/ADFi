@@ -23,6 +23,8 @@ public sealed record DesktopEntitlement(
 
 public sealed record RegistrationReceipt(Guid UserId, string Message);
 
+public sealed record DesktopFeedbackReceipt(Guid FeedbackId, string Status, string Message);
+
 public sealed class AdfiApiException(string message, HttpStatusCode? statusCode = null, Exception? inner = null)
     : Exception(message, inner)
 {
@@ -103,6 +105,81 @@ public sealed class AdfiApiClient(HttpClient httpClient)
             cancellationToken).ConfigureAwait(false);
         var projects = await ReadRequiredAsync<DiscoverSurface[]>(response, cancellationToken).ConfigureAwait(false);
         return projects;
+    }
+
+    public async Task<ViewerVqaFeaturePolicy> GetViewerVqaPolicyAsync(
+        CancellationToken cancellationToken)
+    {
+        using var response = await SendAsync(
+            HttpMethod.Get,
+            "api/v1/features/viewer-vqa",
+            null,
+            null,
+            cancellationToken).ConfigureAwait(false);
+        return await ReadRequiredAsync<ViewerVqaFeaturePolicy>(response, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<VideoContextResolution?> GetDiscoverMomentContextAsync(
+        Guid projectId,
+        long timestampMs,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await SendAsync(
+                HttpMethod.Get,
+                $"api/v1/discover/{projectId:D}/moment-context?timestampMs={timestampMs}",
+                null,
+                null,
+                cancellationToken).ConfigureAwait(false);
+            return await ReadRequiredAsync<VideoContextResolution>(response, cancellationToken).ConfigureAwait(false);
+        }
+        catch (AdfiApiException exception) when (exception.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
+    public async Task<VideoContextResolution?> GetDiscoverMomentContextByYoutubeIdAsync(
+        string youtubeVideoId,
+        long timestampMs,
+        CancellationToken cancellationToken)
+    {
+        if (!YoutubeVideoUrl.TryParseVideoId(youtubeVideoId, out var normalized))
+        {
+            throw new ArgumentException("A valid YouTube video ID is required.", nameof(youtubeVideoId));
+        }
+
+        try
+        {
+            using var response = await SendAsync(
+                HttpMethod.Get,
+                $"api/v1/discover/by-youtube/{Uri.EscapeDataString(normalized)}/moment-context?timestampMs={timestampMs}",
+                null,
+                null,
+                cancellationToken).ConfigureAwait(false);
+            return await ReadRequiredAsync<VideoContextResolution>(response, cancellationToken).ConfigureAwait(false);
+        }
+        catch (AdfiApiException exception) when (exception.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
+    public async Task<DesktopFeedbackReceipt> SubmitDiscoverFeedbackAsync(
+        string token,
+        Guid projectId,
+        long timestampMs,
+        string body,
+        CancellationToken cancellationToken)
+    {
+        using var response = await SendAsync(
+            HttpMethod.Post,
+            $"api/v1/discover/{projectId:D}/feedback",
+            new { timestampMs, body },
+            token,
+            cancellationToken).ConfigureAwait(false);
+        return await ReadRequiredAsync<DesktopFeedbackReceipt>(response, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task LogoutAsync(string token, CancellationToken cancellationToken)

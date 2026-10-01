@@ -370,6 +370,44 @@ public partial class MainWindow : Window, IDisposable
         var selected = DiscoverProjects.SelectedItem is DiscoverSurface;
         OpenDiscoverProjectButton.IsEnabled = selected;
         CopyDiscoverProjectButton.IsEnabled = selected;
+        OpenDiscoverViewerButton.IsEnabled = selected
+                                             && ViewerVqaAccessPolicy.CanUseViewer(
+                                                 entitlement?.Plan ?? SubscriptionPlan.None,
+                                                 entitlementVerified);
+    }
+
+    private void OpenInteractiveViewerButton_OnClick(object sender, RoutedEventArgs e) =>
+        OpenInteractiveViewer(null);
+
+    private void OpenDiscoverViewerButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (DiscoverProjects.SelectedItem is DiscoverSurface project)
+        {
+            OpenInteractiveViewer(project);
+        }
+    }
+
+    private void OpenInteractiveViewer(DiscoverSurface? publication)
+    {
+        var plan = entitlement?.Plan ?? SubscriptionPlan.None;
+        if (!ViewerVqaAccessPolicy.CanUseViewer(plan, entitlementVerified))
+        {
+            Announce("A current verified Community or Creator subscription is required for moment-specific video questions.");
+            return;
+        }
+
+        var viewer = new InteractiveVideoWindow(
+            configuration,
+            apiClient,
+            plan,
+            entitlementVerified,
+            session?.Token,
+            publication)
+        {
+            Owner = this,
+        };
+        viewer.Show();
+        Announce("Accessible Interactive Video Viewer opened. Viewer questions do not change projects.");
     }
 
     private void OpenDiscoverProjectButton_OnClick(object sender, RoutedEventArgs e)
@@ -649,6 +687,10 @@ public partial class MainWindow : Window, IDisposable
             plan,
             entitlementVerified,
             selected);
+
+        OpenInteractiveViewerButton.IsEnabled = ViewerVqaAccessPolicy.CanUseViewer(plan, entitlementVerified);
+        OpenDiscoverViewerButton.IsEnabled = DiscoverProjects.SelectedItem is DiscoverSurface
+                                             && ViewerVqaAccessPolicy.CanUseViewer(plan, entitlementVerified);
 
         RunHardwareProfileButton.IsEnabled = canCreate && !operationRunning;
         RightsAttestationCheckBox.IsEnabled = canCreate && !operationRunning;

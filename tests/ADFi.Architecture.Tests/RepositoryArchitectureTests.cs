@@ -35,6 +35,7 @@ public sealed class RepositoryArchitectureTests
             "EmailTextBox",
             "PasswordInput",
             "SignInButton",
+            "OpenInteractiveViewerButton",
             "RightsAttestationCheckBox",
             "RunHardwareProfileButton",
             "SelectLocalVideoButton",
@@ -45,6 +46,7 @@ public sealed class RepositoryArchitectureTests
             "RefreshDiscoverButton",
             "DiscoverProjects",
             "OpenDiscoverProjectButton",
+            "OpenDiscoverViewerButton",
         };
 
         foreach (var name in requiredNames)
@@ -68,7 +70,54 @@ public sealed class RepositoryArchitectureTests
             .Where(value => value is not null)
             .Select(value => int.Parse(value!, System.Globalization.CultureInfo.InvariantCulture))
             .ToArray();
-        Assert.Equal(Enumerable.Range(1, 28), tabIndices.Order());
+        Assert.Equal(Enumerable.Range(1, 30), tabIndices.Order());
+    }
+
+    [Fact]
+    public void InteractiveViewerHasDeterministicQuestionFocusOrderAndNoCanvas()
+    {
+        var document = XDocument.Load(RepositoryPath("src", "ADFi.Desktop", "InteractiveVideoWindow.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        Assert.Empty(document.Descendants(presentation + "Canvas"));
+
+        var question = document.Descendants().Single(element => element.Attribute(xaml + "Name")?.Value == "MomentQuestionTextBox");
+        var dictate = document.Descendants().Single(element => element.Attribute(xaml + "Name")?.Value == "DictateButton");
+        Assert.Equal("11", question.Attribute("TabIndex")?.Value);
+        Assert.Equal("12", dictate.Attribute("TabIndex")?.Value);
+        Assert.Equal("Ask about this moment", question.Attribute("AutomationProperties.Name")?.Value);
+        Assert.Equal("DICTATE question using Windows voice typing", dictate.Attribute("AutomationProperties.Name")?.Value);
+        var tabIndices = document.Descendants()
+            .Select(element => element.Attribute("TabIndex")?.Value)
+            .Where(value => value is not null)
+            .Select(value => int.Parse(value!, System.Globalization.CultureInfo.InvariantCulture))
+            .Order()
+            .ToArray();
+        Assert.Equal(Enumerable.Range(1, 25), tabIndices);
+    }
+
+    [Fact]
+    public void YoutubeViewerUsesOfficialIframeAndContainsNoDownloaderDependency()
+    {
+        var playback = File.ReadAllText(RepositoryPath("src", "ADFi.Desktop", "InteractivePlaybackControllers.cs"));
+        var project = File.ReadAllText(RepositoryPath("src", "ADFi.Desktop", "ADFi.Desktop.csproj"));
+        Assert.Contains("https://www.youtube.com/iframe_api", playback, StringComparison.Ordinal);
+        Assert.Contains("pauseVideo()", playback, StringComparison.Ordinal);
+        Assert.Contains("playVideo()", playback, StringComparison.Ordinal);
+        Assert.Contains("getCurrentTime()", playback, StringComparison.Ordinal);
+        Assert.DoesNotContain("yt-dlp", playback + project, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("youtube-dl", playback + project, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void YoutubeCaptureFeatureFlagDefaultsOffInProductionConfiguration()
+    {
+        var json = File.ReadAllText(RepositoryPath("src", "ADFi.Api", "appsettings.json"));
+        Assert.Contains("\"YoutubeEphemeralAccessibilityCaptureEnabled\": false", json, StringComparison.Ordinal);
+        Assert.Contains("\"ChatGptPlanUsageIntegrationEnabled\": false", json, StringComparison.Ordinal);
+        var migration = File.ReadAllText(RepositoryPath(
+            "src", "ADFi.Infrastructure", "Migrations", "0004_interactive_viewer_vqa.sql"));
+        Assert.Contains("'false'::jsonb", migration, StringComparison.Ordinal);
     }
 
     [Fact]
