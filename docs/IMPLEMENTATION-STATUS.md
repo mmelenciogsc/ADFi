@@ -16,7 +16,7 @@ Status date: 2026-10-02. This file distinguishes executable, tested code from in
 - Phases 6–8 include AD-necessity scoring, quiet-window selection, an evidence-bound writer, 180-WPM planning, spoiler/dialogue/evidence checks, five reviewed Piper voice choices, per-segment cached synthesis, actual WAV measurement, and at most three shortening attempts before required review. Speech is never silently time-compressed.
 - Phase 9 creates a full draft by stream-copying compatible source video with temporary reviewed audio, can create an exact short focus preview, persists `REVIEW_IN_PROGRESS`, and checkpoints the artifact for crash recovery.
 - Phase 12 validates media/evidence/narration invariants, builds a narration track, uses smooth source-audio ducking and limiting, stream-copies compatible H.264/HEVC/AV1 video when possible, and never overwrites the source.
-- Pipeline checkpoints and project edits are atomic and append-only. Edit application uses optimistic version checks; undo and checkpoint restoration create compensating versions.
+- Pipeline phase starts, completions and failures are checkpointed atomically with concise screenreader progress announcements; restart skips only verified completed phases. Project edits are append-only, use optimistic version checks, and undo/checkpoint restoration create compensating versions.
 - Nontrivial conversation requests pass through a deterministic intent classifier and schema-validated local Planner. Tool names must exist in the versioned allow-list, and task execution remains strictly sequential with result persistence after every atomic task.
 - Creator activation profiling records architecture, CPU features/threads, system/free RAM, NVIDIA model/total/free VRAM when available, acceleration, disk type/free space and bounded FFmpeg throughput. Ollama throughput is measured only after the selected model is installed and immediately unloaded.
 - Ollama is behind `ILocalModelRuntime`; the balanced tier is official `qwen3-vl:4b`, with replaceable constrained/large tiers and no schema changes.
@@ -28,7 +28,7 @@ Status date: 2026-10-02. This file distinguishes executable, tested code from in
 - The anonymous API exposes liveness, dependency-aware readiness, plan and DISCOVER endpoints. The public HTML surface has landmarks, a skip link, the official privacy-enhanced YouTube player and ADFi canonical sharing rather than bare YouTube sharing.
 - Ubuntu deployment stages an immutable release, runs migrations before switching the current symlink, restarts the hardened systemd unit, checks readiness and restores the prior release on failure.
 
-The current automated suite contains 114 passing tests: 99 core/integration-policy tests, 9 API tests and 6 architecture tests. The media integration test generates a real local H.264/AAC fixture, runs ffprobe, Phase 0, audio preparation, OpenCV visual indexing, source-preserving final rendering, full-draft preview assembly and an exact short focus preview.
+The current automated suite contains 117 passing tests: 102 core/integration-policy tests, 9 API tests and 6 architecture tests. The media integration test generates a real local H.264/AAC fixture, runs ffprobe, Phase 0, audio preparation, OpenCV visual indexing, source-preserving final rendering, full-draft preview assembly and an exact short focus preview.
 
 ## Not yet production-validated
 
