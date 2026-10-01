@@ -20,5 +20,6 @@
     <ProjectReference Include="../../src/ADFi.LocalAI/ADFi.LocalAI.csproj" />
     <ProjectReference Include="../../src/ADFi.Media/ADFi.Media.csproj" />
     <ProjectReference Include="../../src/ADFi.Web/ADFi.Web.csproj" />
+    <ProjectReference Include="../../src/ADFi.YouTube/ADFi.YouTube.csproj" />
   </ItemGroup>
 </Project>

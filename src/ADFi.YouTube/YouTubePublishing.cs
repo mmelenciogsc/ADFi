@@ -30,3 +30,22 @@ public interface IYouTubePublisher
         YouTubePublicationRequest request,
         CancellationToken cancellationToken);
 }
+
+public sealed record GoogleOAuthConfiguration(string ClientId, Uri LoopbackRedirectUri);
+
+public sealed record GoogleAuthorizationRequest(
+    Uri AuthorizationUri,
+    string State,
+    string CodeVerifier,
+    Uri RedirectUri);
+
+public sealed record GoogleTokenSet(
+    string AccessToken,
+    string? RefreshToken,
+    DateTimeOffset ExpiresAtUtc,
+    string Scope);
+
+public interface IYouTubeAccessTokenProvider
+{
+    Task<string> GetAccessTokenAsync(CancellationToken cancellationToken);
+}
