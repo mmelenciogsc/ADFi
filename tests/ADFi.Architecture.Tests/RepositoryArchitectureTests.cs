@@ -89,6 +89,16 @@ public sealed class RepositoryArchitectureTests
         Assert.Contains("health/ready", script, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void PayPalWebhookInboxSupportsIdempotentAndOutOfOrderDelivery()
+    {
+        var sql = File.ReadAllText(RepositoryPath(
+            "src", "ADFi.Infrastructure", "Migrations", "0002_paypal_webhook_inbox.sql"));
+        Assert.Contains("provider_event_id text PRIMARY KEY", sql, StringComparison.Ordinal);
+        Assert.Contains("WAITING_FOR_SUBSCRIPTION", sql, StringComparison.Ordinal);
+        Assert.Contains("provider_status_at_utc", sql, StringComparison.Ordinal);
+    }
+
     private static string RepositoryPath(params string[] parts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

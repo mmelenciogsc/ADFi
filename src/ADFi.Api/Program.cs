@@ -1,6 +1,7 @@
 using ADFi.Api;
 using ADFi.Core;
 using ADFi.Infrastructure.Notifications;
+using ADFi.Infrastructure.Payments;
 using ADFi.Infrastructure.Postgres;
 using ADFi.Web;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -13,17 +14,34 @@ var connectionString = builder.Configuration.GetConnectionString("ADFi");
 var smtpOptions = ReadSmtpOptions(builder.Configuration);
 var persistenceConfigured = !string.IsNullOrWhiteSpace(connectionString);
 var registrationConfigured = persistenceConfigured && smtpOptions is not null;
+var payPalOptions = ReadPayPalOptions(builder.Configuration);
+var paymentsConfigured = persistenceConfigured && payPalOptions is not null;
+
+builder.Services.AddSingleton(TimeProvider.System);
 
 if (persistenceConfigured)
 {
     builder.Services.AddSingleton(new AdfiDatabase(connectionString!));
     builder.Services.AddSingleton<AccountRepository>();
+    builder.Services.AddSingleton<SubscriptionRepository>();
 }
 
 if (smtpOptions is not null)
 {
     builder.Services.AddSingleton(smtpOptions);
     builder.Services.AddSingleton<IAccountEmailSender, SmtpAccountEmailSender>();
+}
+
+if (paymentsConfigured)
+{
+    builder.Services.AddSingleton(payPalOptions!);
+    builder.Services.AddHttpClient("paypal");
+    builder.Services.AddTransient<IPayPalProvider>(services => new PayPalClient(
+        services.GetRequiredService<IHttpClientFactory>().CreateClient("paypal"),
+        services.GetRequiredService<PayPalConfiguration>(),
+        services.GetRequiredService<TimeProvider>()));
+    builder.Services.AddSingleton<IPayPalWebhookEventStore, PostgresPayPalWebhookEventStore>();
+    builder.Services.AddTransient<PayPalWebhookProcessor>();
 }
 
 var healthChecks = builder.Services.AddHealthChecks();
@@ -103,6 +121,29 @@ else
         .AllowAnonymous();
 }
 
+if (paymentsConfigured && Uri.TryCreate(builder.Configuration["PublicBaseUrl"], UriKind.Absolute, out var paymentPublicBaseUri))
+{
+    app.MapPaymentEndpoints(paymentPublicBaseUri);
+}
+else
+{
+    app.MapMethods(
+            "/api/v1/subscriptions/{**path}",
+            ["GET", "POST"],
+            () => Results.Problem(
+                "Subscription services are unavailable until PostgreSQL and PayPal are configured.",
+                statusCode: StatusCodes.Status503ServiceUnavailable))
+        .RequireRateLimiting("authentication")
+        .AllowAnonymous();
+    app.MapPost(
+            "/api/v1/paypal/webhook",
+            () => Results.Problem(
+                "PayPal webhook processing is unavailable until server configuration is complete.",
+                statusCode: StatusCodes.Status503ServiceUnavailable))
+        .RequireRateLimiting("authentication")
+        .AllowAnonymous();
+}
+
 if (persistenceConfigured && builder.Configuration.GetValue<bool>("Database:ApplyMigrationsAtStartup"))
 {
     await app.Services.GetRequiredService<AdfiDatabase>()
@@ -129,6 +170,28 @@ static SmtpOptions? ReadSmtpOptions(IConfiguration configuration)
             configuration["Smtp:UserName"],
             configuration["Smtp:Password"],
             publicBaseUri);
+}
+
+static PayPalConfiguration? ReadPayPalOptions(IConfiguration configuration)
+{
+    var environment = configuration["PayPal:Environment"];
+    var clientId = configuration["PayPal:ClientId"];
+    var clientSecret = configuration["PayPal:ClientSecret"];
+    var webhookId = configuration["PayPal:WebhookId"];
+    var communityPlan = configuration["PayPal:CommunityPlanId"];
+    var creatorPlan = configuration["PayPal:CreatorPlanId"];
+    if (new[] { environment, clientId, clientSecret, webhookId, communityPlan, creatorPlan }
+        .Any(string.IsNullOrWhiteSpace))
+    {
+        return null;
+    }
+
+    var apiBaseUri = string.Equals(environment, "Production", StringComparison.OrdinalIgnoreCase)
+        ? new Uri("https://api-m.paypal.com/")
+        : string.Equals(environment, "Sandbox", StringComparison.OrdinalIgnoreCase)
+            ? new Uri("https://api-m.sandbox.paypal.com/")
+            : throw new InvalidOperationException("PayPal:Environment must be Sandbox or Production.");
+    return new(apiBaseUri, clientId!, clientSecret!, webhookId!, communityPlan!, creatorPlan!);
 }
 
 public partial class Program;

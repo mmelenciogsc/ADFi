@@ -70,4 +70,22 @@ public sealed class PublicApiTests : IClassFixture<WebApplicationFactory<Program
         Assert.Contains("<h1>DISCOVER</h1>", html, StringComparison.Ordinal);
         Assert.Contains("No eligible public ADFied works", html, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("/api/v1/subscriptions/entitlements")]
+    [InlineData("/api/v1/subscriptions/checkout")]
+    [InlineData("/api/v1/paypal/webhook")]
+    public async Task PaymentEndpointsFailClosedWhenServerSecretsAreAbsent(string path)
+    {
+        using var request = new HttpRequestMessage(
+            path.EndsWith("entitlements", StringComparison.Ordinal) ? HttpMethod.Get : HttpMethod.Post,
+            path);
+        if (request.Method == HttpMethod.Post)
+        {
+            request.Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
+        }
+
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    }
 }
