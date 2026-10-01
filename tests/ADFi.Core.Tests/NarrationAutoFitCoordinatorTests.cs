@@ -17,7 +17,7 @@ public sealed class NarrationAutoFitCoordinatorTests
         var coordinator = new NarrationAutoFitCoordinator(
             synth,
             runtime,
-            "qwen3-vl:4b",
+            "qwen3-vl:4b-instruct",
             Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_AD_WRITER_SYSTEM.md"));
 
         var result = await coordinator.FitAsync(
@@ -42,7 +42,7 @@ public sealed class NarrationAutoFitCoordinatorTests
         var coordinator = new NarrationAutoFitCoordinator(
             synth,
             runtime,
-            "qwen3-vl:4b",
+            "qwen3-vl:4b-instruct",
             Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_AD_WRITER_SYSTEM.md"));
 
         await Assert.ThrowsAsync<InvalidDataException>(() => coordinator.FitAsync(

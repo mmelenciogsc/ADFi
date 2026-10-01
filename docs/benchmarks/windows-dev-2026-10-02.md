@@ -1,0 +1,43 @@
+# Windows development-machine validation — 2026-10-02
+
+This is measured development evidence, not a universal performance claim. Measurements were taken
+on Windows 11 Home Single Language 10.0.26200 (build 26200), an Intel Core i7-12650H with 16 logical
+processors, 16,870,072,320 bytes of installed RAM, an NVIDIA GeForce RTX 4060 Laptop GPU reporting
+8,188 MiB total VRAM, and an SSD-backed `D:` workspace.
+
+At the measurement snapshot, 3,719,053,312 bytes of system RAM and 7,956 MiB of VRAM were free. The
+automatic policy therefore conservatively selects the constrained `qwen3-vl:2b-instruct` tier when
+that low free-RAM condition persists. A separately bounded `qwen3-vl:4b-instruct` smoke benchmark
+succeeded at 59.61 generated tokens per second for 7 evaluation tokens; wall time including model
+load was 29.64 seconds. Its Ollama model ID was `ee4b975b58c1`. `keep_alive: 0` was used and both
+`ollama ps` and NVIDIA compute-process telemetry were empty immediately afterward. The 60-frame,
+640x360, libx264 `veryfast` startup-inclusive transcode measurement was 11.12 frames per second.
+
+Installed local runtime evidence:
+
+- Ollama 0.34.4, with Qwen3-VL 2B/4B/8B instruction variants present.
+- Python 3.12.10 isolated under `%LOCALAPPDATA%\ADFi\runtime\python`.
+- `openai-whisper` 20250625; CPU-only `tiny` smoke transcription completed at approximately 149
+  analyzed frames per second on a 2.171-second generated narration sample.
+- `piper-tts` 1.8.0 and all five catalog voices. A real Cori synthesis produced a valid 2.171-second
+  WAV. Voice models remain external assets under `%LOCALAPPDATA%\ADFi\models\piper`.
+- Tesseract 5.4.0.20240606 with Leptonica 1.84.1. A generated `ADFi OCR 2048` image was recovered
+  exactly using page-segmentation mode 7.
+
+The downloaded Piper assets were hashed after installation:
+
+| Asset | SHA-256 |
+| --- | --- |
+| `en_GB-cori-high.onnx` | `470b4dd634c98f8a4850d7626ffc3dfc90774628eeef6605a6dd8f88f30a5903` |
+| `en_GB-cori-high.onnx.json` | `9e7fb5b5671612c22f3c81cbe46c1ae87b031a4632bcb509e499dad6f1e2adec` |
+| `en_US-ljspeech-high.onnx` | `e84352f695c445804406028d9e13a7bb92552ff8bfe88f3669c5cd2b3621c1b0` |
+| `en_US-ljspeech-high.onnx.json` | `7e1f4634af596d83cca997fb7a931ba80b70f8a316a2655ee69c55365e0ace14` |
+| `en_US-bryce-medium.onnx` | `dc9caa6c313199ffb5ac698b6e542fa6cba388aeaf2731e25262e33b9810aef1` |
+| `en_US-bryce-medium.onnx.json` | `7ceb1bc4af6d4e41b6d1edbb86c67e91e01eaa71f66db4cd0ae92ac704d415be` |
+| `en_US-joe-medium.onnx` | `58afce0321b8d9c46d7cdf9c16500cc55a793b4220212dba6b70fb788b3baf06` |
+| `en_US-joe-medium.onnx.json` | `3d6d5410b3795cb1950595247ef8f06190719e6fdbfa3a2356d8ec368e1aad33` |
+| `en_US-sam-medium.onnx` | `56417b3b4afe8ec6bb4cabf06e17d67261fdd5bf334592abcfc80052fba11163` |
+| `en_US-sam-medium.onnx.json` | `8c7fb47f19683b0b81037c5564f9a5ad4699a9da685e0e5da0a72fd3c3f5c1c4` |
+
+This smoke evidence does not replace the required 5-, 15-, and 60-minute 1080p end-to-end matrix,
+JAWS/NVDA acceptance testing, per-voice listening review, or full source-to-final render validation.

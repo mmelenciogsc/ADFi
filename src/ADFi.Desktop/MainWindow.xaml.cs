@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using ADFi.Core;
 using ADFi.Infrastructure;
 using ADFi.Infrastructure.Security;
+using ADFi.LocalAI;
 using ADFi.Media;
 using ADFi.Web;
 using Microsoft.Win32;
@@ -21,6 +22,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly AdfiApiClient apiClient;
     private readonly DesktopSessionStore sessionStore;
     private readonly LocalProjectCatalog projectCatalog;
+    private readonly CreatorHardwareProfileStore hardwareProfileStore;
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private DesktopSession? session;
     private DesktopEntitlement? entitlement;
@@ -43,6 +45,9 @@ public partial class MainWindow : Window, IDisposable
             configuration.ProtectedCredentialRoot,
             "ADFi desktop API session v1"));
         projectCatalog = new LocalProjectCatalog(configuration.ProjectRoot);
+        hardwareProfileStore = new CreatorHardwareProfileStore(
+            configuration.HardwareProfileRoot,
+            configuration.ProjectRoot);
     }
 
     private async void MainWindow_OnLoaded(object sender, RoutedEventArgs e)
@@ -216,6 +221,7 @@ public partial class MainWindow : Window, IDisposable
             session = null;
             entitlement = null;
             entitlementVerified = false;
+            RightsAttestationCheckBox.IsChecked = false;
             UpdateAccountPresentation();
             Announce("Signed out. The protected local session was removed.");
         }
@@ -223,6 +229,11 @@ public partial class MainWindow : Window, IDisposable
 
     private void RightsAttestationCheckBox_OnChanged(object sender, RoutedEventArgs e) =>
         UpdateCreatorAccess();
+
+    private async void RunHardwareProfileButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        await RunCreatorHardwareProfileAsync(force: true, lifetimeCancellation.Token);
+    }
 
     private async void SelectLocalVideoButton_OnClick(object sender, RoutedEventArgs e)
     {
@@ -286,6 +297,7 @@ public partial class MainWindow : Window, IDisposable
                 $"Source validated. {Path.GetFileName(dialog.FileName)}, {FormatDuration(intake.Source.Probe.Duration)}. " +
                 "The immutable source manifest and resumable checkpoint were saved.");
             LogTechnical($"Project {projectId:D}: SOURCE_VALIDATED checkpoint persisted.");
+            RightsAttestationCheckBox.IsChecked = false;
         }
         catch (Exception exception)
         {
@@ -294,9 +306,9 @@ public partial class MainWindow : Window, IDisposable
         finally
         {
             PipelineProgressBar.IsIndeterminate = false;
-            SetLocalOperationState(running: false);
             currentOperationCancellation.Dispose();
             currentOperationCancellation = null;
+            SetLocalOperationState(running: false);
         }
     }
 
@@ -459,6 +471,11 @@ public partial class MainWindow : Window, IDisposable
             entitlement = await apiClient.GetEntitlementAsync(session.Token, cancellationToken);
             entitlementVerified = true;
             UpdateAccountPresentation();
+            if (entitlement.Plan == SubscriptionPlan.Creator && !hardwareProfileStore.HasProfile)
+            {
+                await RunCreatorHardwareProfileAsync(force: false, cancellationToken);
+            }
+
             if (announceResult)
             {
                 Announce(SubscriptionAnnouncement() + ".");
@@ -548,6 +565,50 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    private async Task RunCreatorHardwareProfileAsync(bool force, CancellationToken cancellationToken)
+    {
+        if (!entitlementVerified || entitlement?.Plan != SubscriptionPlan.Creator)
+        {
+            Announce("A current verified Creator subscription is required for hardware profiling.");
+            return;
+        }
+
+        if (currentOperationCancellation is not null)
+        {
+            Announce("Wait for the current local operation to finish or cancel it first.");
+            return;
+        }
+
+        currentOperationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        SetLocalOperationState(running: true);
+        Announce(force
+            ? "Rechecking hardware and running bounded local benchmarks."
+            : "Creator access verified. Profiling hardware and running bounded local benchmarks.");
+        try
+        {
+            var assessment = await hardwareProfileStore.GetOrMeasureAsync(
+                force,
+                currentOperationCancellation.Token);
+            HardwareProfileText.Text = HardwareSummary(assessment);
+            Announce(HardwareProfileText.Text);
+            LogTechnical(
+                $"Hardware profile saved. Tier {assessment.SelectedTier.Name}; " +
+                $"inference {assessment.Profile.MiniatureInferenceTokensPerSecond:F2} tokens/second; " +
+                $"transcode {assessment.Profile.MiniatureTranscodeFramesPerSecond:F2} frames/second.");
+        }
+        catch (Exception exception)
+        {
+            HardwareProfileText.Text = "Hardware profiling did not complete. Creator processing remains fail-closed.";
+            ReportError("Hardware profile", exception);
+        }
+        finally
+        {
+            currentOperationCancellation.Dispose();
+            currentOperationCancellation = null;
+            SetLocalOperationState(running: false);
+        }
+    }
+
     private void UpdateAccountPresentation()
     {
         var signedIn = session is not null;
@@ -589,6 +650,7 @@ public partial class MainWindow : Window, IDisposable
             entitlementVerified,
             selected);
 
+        RunHardwareProfileButton.IsEnabled = canCreate && !operationRunning;
         RightsAttestationCheckBox.IsEnabled = canCreate && !operationRunning;
         SelectLocalVideoButton.IsEnabled = CreatorToolAccess.CanSelectLocalSource(
             plan,
@@ -645,4 +707,20 @@ public partial class MainWindow : Window, IDisposable
 
     private static string FormatTime(TimeSpan value) =>
         $"{(int)value.TotalHours:00}:{value.Minutes:00}:{value.Seconds:00}.{value.Milliseconds:000}";
+
+    private static string HardwareSummary(CreatorHardwareAssessment assessment)
+    {
+        var profile = assessment.Profile;
+        var gpu = profile.GpuModel is null
+            ? "CPU fallback"
+            : $"{profile.GpuModel}, {ToGibibytes(profile.FreeVideoMemoryBytes):F1} GB VRAM free";
+        var benchmark = profile.MiniatureInferenceTokensPerSecond > 0
+            ? $"{profile.MiniatureInferenceTokensPerSecond:F1} local-model tokens per second"
+            : "local-model benchmark deferred";
+        return $"Recommended {assessment.SelectedTier.Name} tier, {assessment.SelectedTier.OllamaModel}. " +
+               $"{ToGibibytes(profile.FreeSystemMemoryBytes):F1} GB RAM free; {gpu}; " +
+               $"{benchmark}; {profile.MiniatureTranscodeFramesPerSecond:F1} transcode frames per second.";
+    }
+
+    private static decimal ToGibibytes(long bytes) => bytes / (1024m * 1024m * 1024m);
 }

@@ -17,6 +17,7 @@ public sealed record HardwareProfile(
     string? GpuVendor,
     string? GpuModel,
     long DedicatedVideoMemoryBytes,
+    long FreeVideoMemoryBytes,
     IReadOnlySet<AccelerationKind> Acceleration,
     string WorkingDiskType,
     long WorkingDiskFreeBytes,
@@ -36,14 +37,14 @@ public sealed record ModelTier(
 
 public static class ModelTierPolicy
 {
-    public const string BalancedQwen3Vl4B = "qwen3-vl:4b";
+    public const string BalancedQwen3Vl4B = "qwen3-vl:4b-instruct";
 
     public static IReadOnlyList<ModelTier> Tiers { get; } =
     [
-        new("Large", "qwen3-vl:8b", Gibibytes(12), Gibibytes(12), 1344, 5),
+        new("Large", "qwen3-vl:8b-instruct", Gibibytes(12), Gibibytes(12), 1344, 5),
         // Consumer "8 GB" GPUs commonly report a few MiB below exactly 8 GiB.
         new("Balanced", BalancedQwen3Vl4B, Gibibytes(8), Mebibytes(7_500), 1024, 3),
-        new("Constrained", "qwen3-vl:2b", Gibibytes(4), 0, 768, 3),
+        new("Constrained", "qwen3-vl:2b-instruct", Gibibytes(4), 0, 768, 3),
     ];
 
     public static ModelTier Select(HardwareProfile profile)
@@ -51,7 +52,7 @@ public static class ModelTierPolicy
         ArgumentNullException.ThrowIfNull(profile);
         return Tiers.FirstOrDefault(tier =>
                    profile.FreeSystemMemoryBytes >= tier.MinimumFreeRamBytes
-                   && profile.DedicatedVideoMemoryBytes >= tier.MinimumVramBytes)
+                   && profile.FreeVideoMemoryBytes >= tier.MinimumVramBytes)
                ?? Tiers[^1];
     }
 

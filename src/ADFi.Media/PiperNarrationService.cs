@@ -99,8 +99,14 @@ public sealed class PiperNarrationService(
         if (!reused)
         {
             var partialPath = outputPath + ".partial";
+            var inputPath = outputPath + ".input.txt";
             try
             {
+                await File.WriteAllTextAsync(
+                    inputPath,
+                    request.Text,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                    cancellationToken).ConfigureAwait(false);
                 var result = await processRunner.RunAsync(
                     configuration.PythonExecutable,
                     [
@@ -108,7 +114,7 @@ public sealed class PiperNarrationService(
                         "--data-dir", Path.GetFullPath(configuration.VoiceDataDirectory),
                         "-m", voice.ModelName,
                         "-f", partialPath,
-                        "--", request.Text,
+                        "--input-file", inputPath,
                     ],
                     cancellationToken).ConfigureAwait(false);
                 if (result.ExitCode != 0 || !File.Exists(partialPath))
@@ -124,6 +130,11 @@ public sealed class PiperNarrationService(
                 if (File.Exists(partialPath))
                 {
                     File.Delete(partialPath);
+                }
+
+                if (File.Exists(inputPath))
+                {
+                    File.Delete(inputPath);
                 }
             }
         }

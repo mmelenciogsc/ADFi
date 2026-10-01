@@ -133,6 +133,7 @@ public sealed class SystemHardwareProfiler(
             gpu?.Vendor,
             gpu?.Model,
             gpu?.TotalBytes ?? 0,
+            gpu?.FreeBytes ?? 0,
             BuildAccelerationSet(gpu),
             diskType,
             disk.AvailableFreeSpace,

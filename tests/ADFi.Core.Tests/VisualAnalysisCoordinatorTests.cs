@@ -47,7 +47,7 @@ public sealed class VisualAnalysisCoordinatorTests
             var runtime = new AnalysisRuntime(response);
             var coordinator = new VisualAnalysisCoordinator(
                 runtime,
-                "qwen3-vl:4b",
+                "qwen3-vl:4b-instruct",
                 Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_VISUAL_ANALYST_SYSTEM.md"),
                 TimeProvider.System);
 
@@ -83,7 +83,7 @@ public sealed class VisualAnalysisCoordinatorTests
             const string response = "{\"sceneId\":\"scene-00000\",\"observations\":[{\"observationId\":\"o\",\"category\":\"object\",\"objectiveDescription\":\"A car.\",\"evidenceIds\":[\"invented-frame\"],\"certainty\":0.9,\"importance\":0.8,\"alreadyConveyedBySourceAudio\":false}],\"potentialOnScreenText\":[],\"requiresAdditionalFrames\":false,\"requiresExactOcr\":false,\"uncertainty\":null}";
             var runtime = new AnalysisRuntime(response);
             var coordinator = new VisualAnalysisCoordinator(
-                runtime, "qwen3-vl:4b",
+                runtime, "qwen3-vl:4b-instruct",
                 Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_VISUAL_ANALYST_SYSTEM.md"),
                 TimeProvider.System);
 

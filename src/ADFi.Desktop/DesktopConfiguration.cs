@@ -5,7 +5,8 @@ namespace ADFi.Desktop;
 public sealed record DesktopConfiguration(
     Uri ApiBaseUri,
     string ProjectRoot,
-    string ProtectedCredentialRoot)
+    string ProtectedCredentialRoot,
+    string HardwareProfileRoot)
 {
     public static DesktopConfiguration Load()
     {
@@ -28,7 +29,8 @@ public sealed record DesktopConfiguration(
         return new(
             EnsureTrailingSlash(apiBaseUri),
             Path.Combine(root, "Projects"),
-            Path.Combine(root, "Secure"));
+            Path.Combine(root, "Secure"),
+            Path.Combine(root, "Hardware"));
     }
 
     private static Uri EnsureTrailingSlash(Uri value) =>

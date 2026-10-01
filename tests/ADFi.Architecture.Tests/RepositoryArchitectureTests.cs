@@ -36,6 +36,7 @@ public sealed class RepositoryArchitectureTests
             "PasswordInput",
             "SignInButton",
             "RightsAttestationCheckBox",
+            "RunHardwareProfileButton",
             "SelectLocalVideoButton",
             "LocalProjectsList",
             "PipelineProgressBar",
@@ -67,7 +68,7 @@ public sealed class RepositoryArchitectureTests
             .Where(value => value is not null)
             .Select(value => int.Parse(value!, System.Globalization.CultureInfo.InvariantCulture))
             .ToArray();
-        Assert.Equal(Enumerable.Range(1, 27), tabIndices.Order());
+        Assert.Equal(Enumerable.Range(1, 28), tabIndices.Order());
     }
 
     [Fact]

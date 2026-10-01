@@ -6,7 +6,7 @@ Use current official distribution channels and pin exact production versions and
 | --- | --- | --- | --- |
 | .NET 10 / ASP.NET Core / WPF | Desktop and API | <https://dotnet.microsoft.com/download/dotnet/10.0> | Microsoft product terms; SDK 10.0.401 is pinned in `global.json`. |
 | Ollama | Default local model runtime | <https://ollama.com/download/windows> | Record installed runtime and model digest per run. |
-| Qwen3-VL | Local visual reasoning | <https://ollama.com/library/qwen3-vl> | Balanced default is `qwen3-vl:4b`; do not assume all model tiers have identical resource needs. |
+| Qwen3-VL | Local visual reasoning | <https://ollama.com/library/qwen3-vl> | Balanced default is the verified `qwen3-vl:4b-instruct` tag; do not assume all model tiers have identical resource needs. |
 | FFmpeg/ffprobe | Probe, extraction, mixing and rendering | <https://ffmpeg.org/download.html> | Record build configuration and comply with the license of the distributed build. |
 | OpenCV / OpenCvSharp | Deterministic visual processing and face continuity | <https://opencv.org/releases/> and <https://github.com/shimat/opencvsharp> | OpenCV 4.13 wrapper/runtime is NuGet-pinned; YuNet/SFace model files require their own release manifest. |
 | Whisper | Chunk transcription | <https://github.com/openai/whisper> | Official `openai-whisper` 20250625 is pinned for the bounded worker; models remain external, hashed assets selected by hardware policy. |

@@ -34,7 +34,7 @@ public sealed class ConversationPlanningTests
         var runtime = new FakeRuntime(response);
         var planner = new LocalConversationPlanner(
             runtime,
-            "qwen3-vl:4b",
+            "qwen3-vl:4b-instruct",
             Path.Combine(root, "prompts", "ADFI_PLANNER_SYSTEM.md"),
             Path.Combine(root, "prompts", "semantic-tools.json"),
             TimeProvider.System);
@@ -51,7 +51,7 @@ public sealed class ConversationPlanningTests
     {
         var runtime = new FakeRuntime("unused");
         var planner = new LocalConversationPlanner(
-            runtime, "qwen3-vl:4b", "missing", "missing", TimeProvider.System);
+            runtime, "qwen3-vl:4b-instruct", "missing", "missing", TimeProvider.System);
         var result = await planner.PlanAsync(
             "Who is on the left?",
             new(Guid.NewGuid(), 1, TimeSpan.FromMinutes(1), [], []),

@@ -19,7 +19,7 @@ public sealed class AdDraftCoordinatorTests
                 "{\"text\":\"She pockets a key.\",\"evidenceIds\":[\"frame-1\"],\"uncertainty\":null,\"reason\":\"Important action\"}");
             var coordinator = new AdDraftCoordinator(
                 runtime,
-                "qwen3-vl:4b",
+                "qwen3-vl:4b-instruct",
                 Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_AD_WRITER_SYSTEM.md"));
             var opportunity = new ProposedAdInterval(
                 "00001", "scene-1", new(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(4)),
@@ -54,7 +54,7 @@ public sealed class AdDraftCoordinatorTests
             var runtime = new QueueRuntime(
                 "{\"text\":\"John enters.\",\"evidenceIds\":[\"frame-1\"],\"uncertainty\":null,\"reason\":\"Entrance\"}");
             var coordinator = new AdDraftCoordinator(
-                runtime, "qwen3-vl:4b",
+                runtime, "qwen3-vl:4b-instruct",
                 Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_AD_WRITER_SYSTEM.md"));
             var opportunity = new ProposedAdInterval(
                 "1", "scene-1", new(TimeSpan.Zero, TimeSpan.FromSeconds(3)), 3_000,

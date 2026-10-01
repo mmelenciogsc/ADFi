@@ -19,6 +19,7 @@ public sealed class SystemHardwareProfilerTests
         Assert.Equal("NVIDIA", profile.GpuVendor);
         Assert.Equal("Test GPU", profile.GpuModel);
         Assert.Equal(8192L * 1024 * 1024, profile.DedicatedVideoMemoryBytes);
+        Assert.Equal(6144L * 1024 * 1024, profile.FreeVideoMemoryBytes);
         Assert.Contains(AccelerationKind.NvidiaCuda, profile.Acceleration);
         Assert.Equal(17.5m, profile.MiniatureInferenceTokensPerSecond);
         Assert.True(profile.MiniatureTranscodeFramesPerSecond > 0);

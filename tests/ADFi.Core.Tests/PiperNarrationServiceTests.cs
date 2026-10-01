@@ -31,6 +31,9 @@ public sealed class PiperNarrationServiceTests
             Assert.Equal(1, runner.InvocationCount);
             Assert.Contains("--data-dir", runner.LastArguments);
             Assert.Contains("en_GB-cori-high", runner.LastArguments);
+            Assert.Contains("--input-file", runner.LastArguments);
+            Assert.Equal(request.Text, runner.LastInputText);
+            Assert.DoesNotContain(request.Text, runner.LastArguments);
         }
         finally
         {
@@ -77,6 +80,7 @@ public sealed class PiperNarrationServiceTests
     {
         public int InvocationCount { get; private set; }
         public IReadOnlyList<string> LastArguments { get; private set; } = [];
+        public string? LastInputText { get; private set; }
 
         public Task<NarrationProcessResult> RunAsync(
             string executable,
@@ -85,6 +89,8 @@ public sealed class PiperNarrationServiceTests
         {
             InvocationCount++;
             LastArguments = arguments;
+            var inputIndex = arguments.IndexOf("--input-file") + 1;
+            LastInputText = File.ReadAllText(arguments[inputIndex]);
             var outputIndex = arguments.IndexOf("-f") + 1;
             WriteWave(arguments[outputIndex], duration);
             return Task.FromResult(new NarrationProcessResult(0, string.Empty, string.Empty));

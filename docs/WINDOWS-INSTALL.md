@@ -17,14 +17,19 @@ Extract the package to a user-writable versioned directory such as `%LOCALAPPDAT
 
 ## Local media and AI dependencies
 
-Install current official 64-bit FFmpeg/ffprobe, Ollama and Tesseract packages, add their executable directories to the user `PATH`, and validate their publisher signatures or release checksums. Then run:
+Install Python 3.12 x64 plus current official 64-bit FFmpeg/ffprobe, Ollama and Tesseract packages, add their executable directories to the user `PATH`, and validate their publisher signatures or release checksums. Then run:
 
 ```bat
 deploy\windows\install-local-ai.cmd
-ollama pull qwen3-vl:4b
+ollama pull qwen3-vl:4b-instruct
 ```
 
 The first command creates an isolated per-user Python environment and installs the exact Whisper and Piper versions in `requirements-local-ai.txt`; it does not modify system Python. Ollama model data, Whisper weights, Piper voice assets, OpenCV face models and Tesseract language data are never committed to Git. Record their version, license, source URL and SHA-256 in the deployment release manifest. Qwen3-VL is loaded only during bounded visual phases, Whisper normally remains on CPU, and every heavyweight runtime is unloaded before the next phase.
+
+Download the five reviewed Piper voice names from `PiperVoiceCatalog` into
+`%LOCALAPPDATA%\ADFi\models\piper` with `python -m piper.download_voices`. The desktop writes
+narration text to a short-lived UTF-8 input file for Piper and deletes it immediately after each
+segment; narration text is not placed on a process command line.
 
 ## Accessible first run
 

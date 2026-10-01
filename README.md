@@ -50,7 +50,7 @@ The desktop defaults to `https://BLACKOUT/` for this LAN development environment
 with an HTTPS URI in `ADFI_API_BASE_URL`. The client does not bypass certificate validation; see the
 development-certificate procedure in [Ubuntu deployment](docs/UBUNTU-DEPLOYMENT.md).
 
-FFmpeg/ffprobe and Ollama must be on `PATH` for local pipeline operations. The balanced model ID is `qwen3-vl:4b`; the model is not downloaded during build or committed to Git. Maintained Piper, licensed voice packages, Whisper and Tesseract are separate local dependencies described in [dependencies](docs/DEPENDENCIES.md). Reproducible packaging, local-runtime installation, accessible first run and rollback are documented in [Windows installation](docs/WINDOWS-INSTALL.md).
+FFmpeg/ffprobe and Ollama must be on `PATH` for local pipeline operations. The verified balanced model ID is `qwen3-vl:4b-instruct`; the model is not downloaded during build or committed to Git. Maintained Piper, licensed voice packages, Whisper and Tesseract are separate local dependencies described in [dependencies](docs/DEPENDENCIES.md). Reproducible packaging, local-runtime installation, accessible first run and rollback are documented in [Windows installation](docs/WINDOWS-INSTALL.md).
 
 ## Security and deployment
 

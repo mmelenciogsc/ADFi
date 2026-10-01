@@ -131,9 +131,22 @@
                             <StackPanel Margin="8">
                                 <TextBlock TextWrapping="Wrap"
                                            Text="A current server-verified Creator subscription is required. Source intake accepts supported local video files only." />
+                                <TextBlock x:Name="HardwareProfileText"
+                                           Margin="4,8,4,0"
+                                           Text="Creator hardware has not been profiled for this Windows account."
+                                           TextWrapping="Wrap"
+                                           AutomationProperties.Name="Creator hardware profile status" />
+                                <Button x:Name="RunHardwareProfileButton"
+                                        Content="Run _hardware profile"
+                                        TabIndex="12"
+                                        IsEnabled="False"
+                                        HorizontalAlignment="Left"
+                                        Click="RunHardwareProfileButton_OnClick"
+                                        AutomationProperties.Name="Run Creator hardware profile and miniature benchmark"
+                                        AutomationProperties.HelpText="Measures free resources and a bounded local transcode and model sample, then unloads the model." />
                                 <CheckBox x:Name="RightsAttestationCheckBox"
                                           Margin="4,12"
-                                          TabIndex="12"
+                                          TabIndex="13"
                                           Content="I confirm that I own this media or have all rights/authorization necessary to process, modify and publish this ADFied version."
                                           AutomationProperties.Name="Rights and authorization confirmation"
                                           AutomationProperties.HelpText="Required before selecting a local source video. This confirmation is recorded but is not independent proof of ownership."
@@ -142,14 +155,14 @@
                                 <WrapPanel>
                                     <Button x:Name="SelectLocalVideoButton"
                                             Content="Select _local video"
-                                            TabIndex="13"
+                                            TabIndex="14"
                                             IsEnabled="False"
                                             Click="SelectLocalVideoButton_OnClick"
                                             AutomationProperties.Name="Select local source video"
                                             AutomationProperties.HelpText="Available after a current Creator entitlement is verified and rights confirmation is checked." />
                                     <Button x:Name="CancelOperationButton"
                                             Content="_Cancel current operation"
-                                            TabIndex="14"
+                                            TabIndex="15"
                                             IsEnabled="False"
                                             Click="CancelOperationButton_OnClick"
                                             AutomationProperties.Name="Cancel current local processing operation" />
@@ -163,7 +176,7 @@
                                 <ListBox x:Name="LocalProjectsList"
                                          MinHeight="90"
                                          MaxHeight="210"
-                                         TabIndex="15"
+                                         TabIndex="16"
                                          SelectionChanged="LocalProjectsList_OnSelectionChanged"
                                          AutomationProperties.Name="Local ADFication projects"
                                          AutomationProperties.HelpText="Use the arrow keys to select a project and hear its latest verified checkpoint.">
@@ -180,7 +193,7 @@
                                            AutomationProperties.Name="Selected project details" />
                                 <Button x:Name="OpenLocalProjectButton"
                                         Content="_Open selected project for review"
-                                        TabIndex="16"
+                                        TabIndex="17"
                                         IsEnabled="False"
                                         HorizontalAlignment="Left"
                                         Click="OpenLocalProjectButton_OnClick"
@@ -202,21 +215,21 @@
                                 <Label Target="{Binding ElementName=DescriptionsList}" Content="Audio _descriptions" />
                                 <ListBox x:Name="DescriptionsList"
                                          MinHeight="90"
-                                         TabIndex="17"
+                                         TabIndex="18"
                                          AutomationProperties.Name="Audio description segments" />
                                 <Label Target="{Binding ElementName=ConversationTextBox}" Content="Project _request" />
                                 <TextBox x:Name="ConversationTextBox"
-                                         TabIndex="18"
+                                         TabIndex="19"
                                          AutomationProperties.Name="Natural conversation project request"
                                          AutomationProperties.HelpText="Enter one request. ADFi will plan compound requests as dependency-safe atomic tasks." />
                                 <WrapPanel>
                                     <Button x:Name="SubmitConversationButton"
                                             Content="_Submit request"
-                                            TabIndex="19"
+                                            TabIndex="20"
                                             IsEnabled="False"
                                             AutomationProperties.Name="Submit project request" />
                                     <Button Content="Play _around selection"
-                                            TabIndex="20"
+                                            TabIndex="21"
                                             IsEnabled="False"
                                             AutomationProperties.Name="Play preview around selected description" />
                                 </WrapPanel>
@@ -230,7 +243,7 @@
                                 <TextBlock Text="On hold or disputed: unavailable until account services are connected" TextWrapping="Wrap" />
                                 <TextBlock Text="Lifetime earnings: unavailable until account services are connected" TextWrapping="Wrap" />
                                 <Button Content="View earnings _details"
-                                        TabIndex="21"
+                                        TabIndex="22"
                                         IsEnabled="False"
                                         HorizontalAlignment="Left"
                                         AutomationProperties.Name="View explainable earnings details" />
@@ -239,12 +252,12 @@
 
                         <Expander Header="Technical activity"
                                   Margin="4"
-                                  TabIndex="22"
+                                  TabIndex="23"
                                   AutomationProperties.Name="Technical activity for advanced users">
                             <TextBox x:Name="TechnicalActivityTextBox"
                                      Margin="8"
                                      MinHeight="110"
-                                     TabIndex="23"
+                                     TabIndex="24"
                                      IsReadOnly="True"
                                      AcceptsReturn="True"
                                      TextWrapping="Wrap"
@@ -275,7 +288,7 @@
                     <WrapPanel Grid.Row="2" Margin="0,0,0,8">
                         <Button x:Name="RefreshDiscoverButton"
                                 Content="_Refresh DISCOVER"
-                                TabIndex="24"
+                                TabIndex="25"
                                 Click="RefreshDiscoverButton_OnClick"
                                 AutomationProperties.Name="Refresh public ADFied works" />
                         <TextBlock x:Name="DiscoverStateText"
@@ -286,7 +299,7 @@
                     </WrapPanel>
                     <ListView Grid.Row="3"
                               x:Name="DiscoverProjects"
-                              TabIndex="25"
+                              TabIndex="26"
                               AutomationProperties.Name="Public ADFied works"
                               AutomationProperties.HelpText="Use arrow keys to select a work. Open it to use the official YouTube player on its ADFi page."
                               SelectionMode="Single"
@@ -309,14 +322,14 @@
                     <WrapPanel Grid.Row="4" Margin="0,8,0,0">
                         <Button x:Name="OpenDiscoverProjectButton"
                                 Content="_Open selected ADFi page"
-                                TabIndex="26"
+                                TabIndex="27"
                                 IsEnabled="False"
                                 Click="OpenDiscoverProjectButton_OnClick"
                                 AutomationProperties.Name="Open selected ADFi project page in the default browser"
                                 AutomationProperties.HelpText="The project page uses the official YouTube player." />
                         <Button x:Name="CopyDiscoverProjectButton"
                                 Content="_Copy selected project page"
-                                TabIndex="27"
+                                TabIndex="28"
                                 IsEnabled="False"
                                 Click="CopyDiscoverProjectButton_OnClick"
                                 AutomationProperties.Name="Copy selected ADFi project page address" />
