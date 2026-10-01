@@ -37,6 +37,23 @@ public sealed class PhaseZeroIntegrationTests
             Assert.Contains(result.Source.Probe.Streams, stream => stream.CodecType == "video");
             Assert.Contains(result.Source.Probe.Streams, stream => stream.CodecType == "audio");
             Assert.True(File.Exists(Path.Combine(projectPath, "manifests", "source-validated.json")));
+
+            var audioService = new AudioPreparationService("ffmpeg", TimeProvider.System);
+            var audio = await audioService.PrepareAsync(
+                result.Attestation.ProjectId,
+                result.Source,
+                projectPath,
+                cancellationToken);
+
+            Assert.Equal(16_000, audio.Characterization.AnalysisSampleRate);
+            Assert.Equal(1, audio.Characterization.AnalysisChannels);
+            Assert.NotEmpty(audio.Chunks);
+            Assert.All(audio.Chunks, chunk =>
+                Assert.True(File.Exists(Path.Combine(
+                    projectPath,
+                    chunk.RelativeAudioPath.Replace('/', Path.DirectorySeparatorChar)))));
+            Assert.True(File.Exists(Path.Combine(projectPath, "manifests", "audio-prepared.json")));
+            Assert.Equal(before, await File.ReadAllBytesAsync(sourcePath, cancellationToken));
         }
         finally
         {
