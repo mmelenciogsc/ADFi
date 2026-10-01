@@ -1,0 +1,23 @@
+[Unit]
+Description=ADFi API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=adfi
+Group=adfi
+WorkingDirectory=/opt/adfi/current
+EnvironmentFile=/etc/adfi/adfi.env
+ExecStart=/usr/bin/dotnet /opt/adfi/current/ADFi.Api.dll
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/adfi
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -7,5 +7,7 @@
     <ProjectReference Include="../ADFi.LocalAI/ADFi.LocalAI.csproj" />
     <ProjectReference Include="../ADFi.Media/ADFi.Media.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="../../prompts/**/*" Link="prompts/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
-
