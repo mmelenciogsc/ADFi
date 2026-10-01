@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace ADFi.Conversation;
 
@@ -52,6 +53,140 @@ public static class TaskPlanValidator
             }
         }
     }
+
+    public static void Validate(
+        TaskPlan plan,
+        IReadOnlySet<string> registeredToolNames)
+    {
+        Validate(plan);
+        ArgumentNullException.ThrowIfNull(registeredToolNames);
+        foreach (var task in plan.Tasks)
+        {
+            if (task.AllowedTools.Count == 0)
+            {
+                throw new InvalidOperationException($"Task {task.TaskId} has no allowed semantic tool.");
+            }
+
+            var unsupported = task.AllowedTools
+                .Where(tool => !registeredToolNames.Contains(tool))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (unsupported.Length > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Task {task.TaskId} references unregistered tools: {string.Join(", ", unsupported)}");
+            }
+        }
+    }
+}
+
+public enum ConversationIntent
+{
+    TrivialVqa,
+    Navigate,
+    Playback,
+    ProposeEdit,
+    CompoundEdit,
+    ChangeVoice,
+    Undo,
+    Validate,
+    Unknown,
+}
+
+public sealed record ClassifiedConversationIntent(
+    ConversationIntent Intent,
+    bool RequiresPlanner,
+    TimeSpan? ReferencedTime);
+
+public static partial class ConversationIntentClassifier
+{
+    public static ClassifiedConversationIntent Classify(string userText)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userText);
+        var normalized = userText.Trim();
+        var time = TryReadTimestamp(normalized);
+        if (UndoRegex().IsMatch(normalized))
+        {
+            return new(ConversationIntent.Undo, true, time);
+        }
+
+        if (VoiceRegex().IsMatch(normalized))
+        {
+            return new(ConversationIntent.ChangeVoice, true, time);
+        }
+
+        if (ValidationRegex().IsMatch(normalized))
+        {
+            return new(ConversationIntent.Validate, true, time);
+        }
+
+        if (EditRegex().Count(normalized) > 1 || CompoundConnectorRegex().IsMatch(normalized))
+        {
+            return new(ConversationIntent.CompoundEdit, true, time);
+        }
+
+        if (EditRegex().IsMatch(normalized))
+        {
+            return new(ConversationIntent.ProposeEdit, true, time);
+        }
+
+        if (PlaybackRegex().IsMatch(normalized))
+        {
+            return new(ConversationIntent.Playback, false, time);
+        }
+
+        if (NavigationRegex().IsMatch(normalized))
+        {
+            return new(ConversationIntent.Navigate, false, time);
+        }
+
+        if (QuestionRegex().IsMatch(normalized))
+        {
+            return new(ConversationIntent.TrivialVqa, false, time);
+        }
+
+        return new(ConversationIntent.Unknown, true, time);
+    }
+
+    private static TimeSpan? TryReadTimestamp(string value)
+    {
+        var match = TimestampRegex().Match(value);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var minutes = int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var seconds = int.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+        return seconds < 60 ? TimeSpan.FromMinutes(minutes) + TimeSpan.FromSeconds(seconds) : null;
+    }
+
+    [GeneratedRegex(@"\b(?:undo|revert)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex UndoRegex();
+
+    [GeneratedRegex(@"\b(?:use|choose|switch to|change to)\s+voice\b|\bvoice\s+[1-5]\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex VoiceRegex();
+
+    [GeneratedRegex(@"\b(?:validate|check every|check all|find unresolved)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ValidationRegex();
+
+    [GeneratedRegex(@"\b(?:fix|change|rewrite|shorten|remove|add|replace|regenerate)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex EditRegex();
+
+    [GeneratedRegex(@"\b(?:and then|then regenerate|then play|, then|; then)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex CompoundConnectorRegex();
+
+    [GeneratedRegex(@"\b(?:play|preview)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex PlaybackRegex();
+
+    [GeneratedRegex(@"\b(?:next|previous)\s+(?:scene|description|unresolved)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex NavigationRegex();
+
+    [GeneratedRegex(@"^(?:what|who|where|when|is|does|do|can|which|how)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex QuestionRegex();
+
+    [GeneratedRegex(@"\b(\d{1,4}):(\d{2})\b", RegexOptions.CultureInvariant)]
+    private static partial Regex TimestampRegex();
 }
 
 public sealed record TaskResult(
