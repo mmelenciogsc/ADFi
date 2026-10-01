@@ -5,7 +5,6 @@
 - OAuth uses the system browser, Authorization Code with PKCE where supported, minimum scopes and explicit account/channel confirmation. Passwords and API keys are never requested through ADFi.
 - Desktop secrets use Windows Credential Manager or DPAPI. Ubuntu secrets use root-readable service credentials or an equivalent secret manager and never Git, deployment archives, command arguments, logs or model prompts.
 - Model output is untrusted: schema validation, evidence provenance, authorization and deterministic policy gates precede state mutation.
-- API controls include verified email, adaptive password hashing, rotating sessions, CSRF protection for browser flows, rate limits, short-lived reset tokens, audit logs and server-authoritative entitlements.
+- API controls include verified email, adaptive password hashing, rotating sessions, per-client rate limits, short-lived one-use reset tokens, HSTS/security headers, bounded request bodies, audit logs and server-authoritative entitlements. Current state-changing endpoints use bearer tokens and do not use ambient browser cookies; if cookie-authenticated browser mutations are added, antiforgery validation is mandatory before enabling them.
 - Financial and contribution history is append-only or corrected with compensating entries. Webhooks and payouts use idempotency keys.
 - Sensitive values must be redacted from structured logs. Repository secret scanning is part of release validation.
-

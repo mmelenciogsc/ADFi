@@ -88,4 +88,13 @@ public sealed class PublicApiTests : IClassFixture<WebApplicationFactory<Program
         using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
     }
+
+    [Fact]
+    public async Task PublicResponseIncludesSecurityHeaders()
+    {
+        using var response = await client.GetAsync("/discover", TestContext.Current.CancellationToken);
+        Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Equal("SAMEORIGIN", response.Headers.GetValues("X-Frame-Options").Single());
+        Assert.Contains("youtube-nocookie.com", response.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
+    }
 }
