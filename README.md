@@ -13,6 +13,8 @@ There are exactly two paid plans. Community costs USD $2/month and does not perm
 
 Source intake accepts supported local video files only. ADFi does not acquire source media from YouTube. YouTube is used solely for authorized OAuth-based publication to the Creator's own channel and official-player playback after publication.
 
+Both paid plans include the Accessible Interactive Video Viewer: **Pause. Ask. Know. Resume.** Community is **Watch + Ask + Contribute + Refer + Earn**; Creator is everything in Community plus **ADFi + Create + Edit + Render + Publish**. Local files play without becoming ADFication projects. Pasted YouTube URLs play only through the official embedded player. Moment VQA is read-only, uses the minimum bounded evidence, prefers existing ADFi accessibility metadata and never creates earnings merely from watching or asking. Arbitrary-YouTube ephemeral visual capture is implemented but production-disabled pending YouTube compliance/legal clearance. See [Interactive Video VQA](docs/INTERACTIVE-VIDEO-VQA.md).
+
 ## Repository layout
 
 | Path | Responsibility |

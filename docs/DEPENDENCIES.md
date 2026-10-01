@@ -5,6 +5,7 @@ Use current official distribution channels and pin exact production versions and
 | Component | Purpose | Official source | License/operational note |
 | --- | --- | --- | --- |
 | .NET 10 / ASP.NET Core / WPF | Desktop and API | <https://dotnet.microsoft.com/download/dotnet/10.0> | Microsoft product terms; SDK 10.0.401 is pinned in `global.json`. |
+| Microsoft Edge WebView2 | Official embedded YouTube playback | <https://developer.microsoft.com/microsoft-edge/webview2/> | NuGet SDK is pinned; use the supported Evergreen runtime. ADFi invokes the official YouTube IFrame API and does not retrieve media URLs. |
 | Ollama | Default local model runtime | <https://ollama.com/download/windows> | Record installed runtime and model digest per run. |
 | Qwen3-VL | Local visual reasoning | <https://ollama.com/library/qwen3-vl> | Balanced default is the verified `qwen3-vl:4b-instruct` tag; do not assume all model tiers have identical resource needs. |
 | FFmpeg/ffprobe | Probe, extraction, mixing and rendering | <https://ffmpeg.org/download.html> | Record build configuration and comply with the license of the distributed build. |
@@ -16,6 +17,6 @@ Use current official distribution channels and pin exact production versions and
 | PostgreSQL | Server persistence | <https://www.postgresql.org/download/linux/ubuntu/> | Use a supported release, local-only database listener where practical, and encrypted backups. |
 | PayPal | Recurring subscriptions/webhooks/payouts | <https://developer.paypal.com/docs/subscriptions/> | Start in sandbox. Client secret and webhook ID remain server-only. |
 | Google/YouTube | Creator-owned publication | <https://developers.google.com/youtube/v3/docs/videos/insert> | Installed-app OAuth; `youtube.upload` plus `youtube.readonly`; prepare compliance audit before public uploads. |
-| Sign in with ChatGPT | User-owned ChatGPT cloud option | <https://developers.openai.com/siwc/token-sharing-open-source/sign-in> | Eligible ChatGPT accounts only; no API key/password request and no access to conversation history. Public Responses API calls use `store:false`. |
+| Sign in with ChatGPT | User-owned ChatGPT cloud option | <https://developers.openai.com/siwc/token-sharing-open-source/sign-in> | Eligible ChatGPT accounts only; no API key/password request and no access to conversation history. Public Responses API calls use `store:false` and `stream:true`. A paid app must obtain OpenAI approval before enabling this production integration. |
 
 `en_US-hfc_*`, `en_US-ryan-*`, `en_GB-semaine-*`, and other noncommercial voice datasets are intentionally absent from the five-voice product catalog.

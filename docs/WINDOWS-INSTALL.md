@@ -17,7 +17,9 @@ Extract the package to a user-writable versioned directory such as `%LOCALAPPDAT
 
 ## Local media and AI dependencies
 
-Install Python 3.12 x64 plus current official 64-bit FFmpeg/ffprobe, Ollama and Tesseract packages, add their executable directories to the user `PATH`, and validate their publisher signatures or release checksums. Then run:
+The Community viewer requires the supported Microsoft Edge WebView2 Evergreen Runtime for official YouTube playback and FFmpeg for bounded local-file moment frames. It does not install or load Ollama, Qwen, Whisper, Piper, CUDA or Vulkan. Windows 11 normally includes WebView2, but the installer must detect it and offer Microsoft's official bootstrapper if absent.
+
+For Creator local ADFication, install Python 3.12 x64 plus current official 64-bit FFmpeg/ffprobe, Ollama and Tesseract packages, add their executable directories to the user `PATH`, and validate their publisher signatures or release checksums. Then run:
 
 ```bat
 deploy\windows\install-local-ai.cmd

@@ -6,9 +6,14 @@ The desktop creates and persists one random `urn:uuid:` host ID, listens only on
 
 Inference lists models available to the selected account, calls the public Responses API (never private ChatGPT backend endpoints), sends `store: false` and `stream: true`, suppresses token deltas from screenreader live regions, and treats only `response.completed` as success. Usage-limit, incomplete, failed and interrupted streams remain distinct recoverable states. The UI shows **Using ChatGPT plan** and a **Manage usage** action only when the active profile grants direct plan use.
 
+`ChatGptPlanResponsesClient` implements those public model-list/Responses transport rules. `ChatGptMomentVqaProvider` refuses visual answers when approved visual evidence is absent, strips paths from prompt context, reports evidence provenance and maps documented plan-usage errors to accessible states. OAuth access tokens are bearer credentials owned by the selected protected local profile; they are never placed in a prompt, URL, project JSON or log.
+
+OpenAI currently instructs paid or remotely hosted apps to request access before offering this integration. ADFi is a paid application, so the server-controlled `ChatGptPlanUsageIntegrationEnabled` production flag defaults off until approval is documented. Code readiness is not represented as provider approval.
+
 Official sources consulted on 2026-10-02:
 
 - https://developers.openai.com/cookbook/articles/sign-in-with-chatgpt
 - https://developers.openai.com/siwc/token-sharing-open-source/sign-in
 - https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference
-
+- https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery
+- https://developers.openai.com/siwc/ui-ux-guidelines
