@@ -1,0 +1,35 @@
+# Windows installation and update
+
+ADFi's primary client target is 64-bit Windows 11. Release packaging is performed from native legacy Command Prompt so the output is tested through the same command environment used for development.
+
+## Reproducible application package
+
+From `D:\ADFi`, run:
+
+```bat
+scripts\test.cmd
+deploy\windows\publish-desktop.cmd 0.1.0
+```
+
+The second command creates a self-contained `artifacts\windows\ADFi-0.1.0-win-x64.zip` and adjacent SHA-256 file. Verify the digest before distribution. A production release must be Authenticode-signed with the publisher's protected code-signing certificate; the repository intentionally contains no certificate or signing secret.
+
+Extract the package to a user-writable versioned directory such as `%LOCALAPPDATA%\Programs\ADFi\0.1.0` and launch `ADFi.Desktop.exe`. User workspaces, model caches and DPAPI-protected credentials belong under `%LOCALAPPDATA%\ADFi`, outside the application directory. Do not run ADFi as administrator.
+
+## Local media and AI dependencies
+
+Install current official 64-bit FFmpeg/ffprobe, Ollama and Tesseract packages, add their executable directories to the user `PATH`, and validate their publisher signatures or release checksums. Then run:
+
+```bat
+deploy\windows\install-local-ai.cmd
+ollama pull qwen3-vl:4b
+```
+
+The first command creates an isolated per-user Python environment and installs the exact Whisper and Piper versions in `requirements-local-ai.txt`; it does not modify system Python. Ollama model data, Whisper weights, Piper voice assets, OpenCV face models and Tesseract language data are never committed to Git. Record their version, license, source URL and SHA-256 in the deployment release manifest. Qwen3-VL is loaded only during bounded visual phases, Whisper normally remains on CPU, and every heavyweight runtime is unloaded before the next phase.
+
+## Accessible first run
+
+Start JAWS 2025 or NVDA before ADFi. Keyboard focus begins in the native two-destination navigation. DISCOVER remains usable without login. Creator processing remains disabled until the user signs in, has a server-authoritative Creator entitlement, checks the rights/authorization attestation and selects an existing local video. The first Creator activation runs the accessible hardware profile and miniature benchmark before recommending a model tier.
+
+## Updates and rollback
+
+Close ADFi, verify the new ZIP digest and signature, extract it into a new versioned directory, then launch and validate MY ADFi, DISCOVER and a short local preview before updating any Start-menu shortcut. Keep the immediately prior application directory until validation succeeds. Because projects and protected credentials are stored outside the binary directory, rollback consists of pointing the shortcut back to the prior signed build; never delete or rewrite user project data during an application rollback.
