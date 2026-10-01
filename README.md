@@ -46,13 +46,12 @@ To launch the desktop shell:
 dotnet run --project src\ADFi.Desktop\ADFi.Desktop.csproj
 ```
 
-FFmpeg/ffprobe and Ollama must be on `PATH` for local pipeline operations. The balanced model ID is `qwen3-vl:4b`; the model is not downloaded during build or committed to Git.
+FFmpeg/ffprobe and Ollama must be on `PATH` for local pipeline operations. The balanced model ID is `qwen3-vl:4b`; the model is not downloaded during build or committed to Git. Maintained Piper, licensed voice packages, Whisper and Tesseract are separate local dependencies described in [dependencies](docs/DEPENDENCIES.md).
 
 ## Security and deployment
 
-Never commit credentials. Windows OAuth tokens belong in Windows Credential Manager/DPAPI; Ubuntu secrets belong in protected server-side environment/credential files. Deployment scripts use Windows OpenSSH and prompt or use keys. See [architecture](docs/ARCHITECTURE.md), [accessibility](docs/ACCESSIBILITY.md), [security](docs/SECURITY.md), [economics](docs/ECONOMICS.md), and [Ubuntu deployment](docs/UBUNTU-DEPLOYMENT.md).
+Never commit credentials. Windows OAuth tokens use current-user DPAPI; Ubuntu secrets belong in protected server-side environment/credential files. Deployment scripts use Windows OpenSSH and prompt or use keys. See [architecture](docs/ARCHITECTURE.md), [pipeline](docs/PIPELINE.md), [dependencies](docs/DEPENDENCIES.md), [accessibility](docs/ACCESSIBILITY.md), [security](docs/SECURITY.md), [economics](docs/ECONOMICS.md), and [Ubuntu deployment](docs/UBUNTU-DEPLOYMENT.md).
 
 ## Current implementation status
 
 The repository is being delivered as tested vertical slices. See [implementation status](docs/IMPLEMENTATION-STATUS.md) for evidence-backed completed and pending scope; no scaffold or mock is represented as production complete.
-
