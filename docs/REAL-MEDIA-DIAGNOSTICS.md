@@ -110,24 +110,27 @@ film-specific branch:
 Earlier pre-fix diagnostic state was preserved—not deleted—under
 `D:\ADFi-DiagnosticRuns\Archived` for forensic comparison.
 
-## Next accessibility-focused evaluation pair
+## Next accessibility-focused three-source evaluation set
 
 The dialogue-dense excerpts above were useful conservative-failure tests but were not strong AD
-demonstrations. Two better external inputs were therefore selected and fully decode-validated under
-`D:\ADFi-TestMedia\ADFi-ready-candidates`:
+demonstrations. Three complementary external inputs were therefore selected and fully
+decode-validated under `D:\ADFi-TestMedia\ADFi-ready-candidates`:
 
 | Input | Rights | Duration and media | Verified AD value |
 | --- | --- | --- | --- |
 | `01_Big_Buck_Bunny_YouTube_CC-BY-3.0.mp4` | Official Blender YouTube upload explicitly reports `Creative Commons Attribution license (reuse allowed)`; Blender also publishes it under CC BY 3.0 | 10:34.625; H.264 1920x1080 60 FPS plus AAC | Nonverbal visual narrative; nine raw quiet spans of at least 2.5 seconds totaling 39.165 seconds |
 | `02_A_Trip_to_the_Moon_Public_Domain.mp4` | Internet Archive metadata applies Public Domain Mark 1.0 to Georges Méliès's 1902 film | 12:41.522; H.264 480x360 25 FPS plus silent AAC | Entire story is visually conveyed and the complete audio bed is silent, providing unrestricted timing coverage |
+| `03_Cosmos_Laundromat_Dialogue_CC-BY-SA-4.0.mp4` | Blender Foundation source readme specifies CC BY-SA 4.0; downloaded directly from the publisher-listed media host and matched its published SHA-256 | 12:10.607; H.264 1718x720 24 FPS plus AAC | Real dialogue, music and effects; ten raw quiet spans of at least 2.5 seconds totaling 54.645 seconds, including eight within the narrative |
 
 Big Buck Bunny was the user-authorized one-time YouTube acquisition and was downloaded outside
 ADFi with an isolated temporary tool that was removed afterward. ADFi still contains no downloader
 or acquisition dependency. The selected H.264 rendition maximizes ordinary Windows compatibility;
 the smaller initial AV1 rendition was retained separately as a recoverable, non-selected copy.
 
-The pair is intentionally complementary: modern color animation exercises characters, reactions,
-objects, pursuit and visual comedy, while the public-domain silent film exercises ensemble staging,
+The set is intentionally complementary. Cosmos Laundromat tests narration placement around actual
+dialogue and meaningful source sound. Big Buck Bunny tests preservation of a nonverbal music/effects
+bed. The public-domain silent film tests unrestricted narration timing plus ensemble staging,
 period imagery, practical effects, transitions and uncertain low-resolution evidence. Exact URLs,
-attribution, license evidence, hashes and limitations are recorded beside the media in
-`D:\ADFi-TestMedia\ADFi-ready-candidates\README.md`. Full Phases 0–12 runs remain the next step.
+attribution, license evidence, hashes, share-alike obligations, thematic notes and limitations are
+recorded beside the media in `D:\ADFi-TestMedia\ADFi-ready-candidates\README.md`. Full Phases 0–12
+runs remain the next step.
