@@ -194,7 +194,9 @@ public sealed class CreatorDraftNarrationWorkflow(
                        && string.Equals(manifest.SourceSha256, source.Source.SourceSha256, StringComparison.OrdinalIgnoreCase)
                        && string.Equals(manifest.AudioAnalysisSha256, audioAnalysisSha256, StringComparison.OrdinalIgnoreCase)
                        && string.Equals(manifest.VisualIndexSha256, visualIndexSha256, StringComparison.OrdinalIgnoreCase)
-                       && string.Equals(manifest.VisualAnalysisSha256, visualAnalysisSha256, StringComparison.OrdinalIgnoreCase);
+                       && string.Equals(manifest.VisualAnalysisSha256, visualAnalysisSha256, StringComparison.OrdinalIgnoreCase)
+                       && manifest.Opportunities.All(item =>
+                           item.Window.Duration >= configuration.MinimumNarrationWindow);
             }
             catch (Exception error) when (error is JsonException or IOException)
             {

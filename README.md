@@ -30,6 +30,7 @@ Both paid plans include the Accessible Interactive Video Viewer: **Pause. Ask. K
 | `src/ADFi.Api` | Hardened ASP.NET Core API boundary for Ubuntu |
 | `src/ADFi.Web` | Public DISCOVER web surface components |
 | `tests` | Unit, architecture and later integration/accessibility suites |
+| `tools/ADFi.Diagnostics` | Rights-gated, resumable local-file runner for measured Phases 0–12 diagnostics |
 | `prompts` | Versioned local-model system prompts and semantic-tool contracts |
 | `deploy` | Windows packaging and Ubuntu deployment assets |
 
@@ -51,6 +52,11 @@ dotnet run --project src\ADFi.Desktop\ADFi.Desktop.csproj
 The desktop defaults to `https://BLACKOUT/` for this LAN development environment. Override it only
 with an HTTPS URI in `ADFI_API_BASE_URL`. The client does not bypass certificate validation; see the
 development-certificate procedure in [Ubuntu deployment](docs/UBUNTU-DEPLOYMENT.md).
+
+The licensed real-media diagnostic procedure and measured outputs are recorded in
+[Real-media diagnostics](docs/REAL-MEDIA-DIAGNOSTICS.md). The diagnostic runner accepts only an
+existing local file and requires an explicit rights-confirmation switch; it contains no network
+media acquisition capability.
 
 FFmpeg/ffprobe and Ollama must be on `PATH` for local pipeline operations. The verified balanced model ID is `qwen3-vl:4b-instruct`; the model is not downloaded during build or committed to Git. Maintained Piper, licensed voice packages, Whisper and Tesseract are separate local dependencies described in [dependencies](docs/DEPENDENCIES.md). Reproducible packaging, local-runtime installation, accessible first run and rollback are documented in [Windows installation](docs/WINDOWS-INSTALL.md).
 

@@ -193,8 +193,32 @@ public sealed class CreatorVisualUnderstandingWorkflow(
     {
         public AdficationPhase Phase => AdficationPhase.OcrAndVisualTextInterpretation;
 
-        public Task<bool> VerifyCheckpointAsync(PipelineCheckpoint checkpoint, CancellationToken cancellationToken) =>
-            VerifyAsync(checkpoint, root, "manifests/visual-text-analysis.json", cancellationToken);
+        public async Task<bool> VerifyCheckpointAsync(PipelineCheckpoint checkpoint, CancellationToken cancellationToken)
+        {
+            const string relative = "manifests/visual-text-analysis.json";
+            if (!await VerifyAsync(checkpoint, root, relative, cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+
+            try
+            {
+                var manifest = await LoadAsync<VisualTextAnalysisManifest>(
+                    Path.Combine(root, relative), cancellationToken).ConfigureAwait(false);
+                var prompt = await PromptResourceLoader.LoadAsync(
+                    configuration.VisualTextPromptPath, cancellationToken).ConfigureAwait(false);
+                var expectedSceneCount = visual.Scenes.Count(scene => scene.Keyframes.Any(frame => frame.PotentialText));
+                return manifest.ProjectId == source.Checkpoint.ProjectId
+                       && string.Equals(manifest.SourceSha256, source.Source.SourceSha256, StringComparison.OrdinalIgnoreCase)
+                       && manifest.Scenes.Count == expectedSceneCount
+                       && manifest.PromptSha256 == prompt.Sha256
+                       && manifest.ModelName == configuration.QwenModel;
+            }
+            catch (Exception exception) when (exception is JsonException or IOException or InvalidDataException)
+            {
+                return false;
+            }
+        }
 
         public async Task<PipelineCheckpoint> ExecuteAsync(Guid projectId, CancellationToken cancellationToken)
         {
@@ -231,36 +255,51 @@ public sealed class CreatorVisualUnderstandingWorkflow(
     {
         public AdficationPhase Phase => AdficationPhase.VlmSceneAnalytics;
 
-        public Task<bool> VerifyCheckpointAsync(PipelineCheckpoint checkpoint, CancellationToken cancellationToken) =>
-            VerifyAsync(checkpoint, root, "manifests/visual-analysis-complete.json", cancellationToken);
+        public async Task<bool> VerifyCheckpointAsync(PipelineCheckpoint checkpoint, CancellationToken cancellationToken)
+        {
+            const string relative = "manifests/visual-analysis-complete.json";
+            if (!await VerifyAsync(checkpoint, root, relative, cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+
+            try
+            {
+                var manifest = await LoadAsync<VisualUnderstandingManifest>(
+                    Path.Combine(root, relative), cancellationToken).ConfigureAwait(false);
+                var prompt = await PromptResourceLoader.LoadAsync(
+                    configuration.VisualAnalystPromptPath, cancellationToken).ConfigureAwait(false);
+                var packages = await BuildPackagesAsync(cancellationToken).ConfigureAwait(false);
+                var expected = packages.ToDictionary(
+                    item => item.Scene.SceneId,
+                    VisualAnalysisCoordinator.ComputeInputFingerprint,
+                    StringComparer.Ordinal);
+                return manifest.ProjectId == source.Checkpoint.ProjectId
+                       && string.Equals(manifest.SourceSha256, source.Source.SourceSha256, StringComparison.OrdinalIgnoreCase)
+                       && manifest.Scenes.Count == packages.Length
+                       && manifest.Scenes.All(scene =>
+                           expected.TryGetValue(scene.SceneId, out var fingerprint)
+                           && scene.InputFingerprint == fingerprint
+                           && scene.Provenance.PromptId == prompt.Id
+                           && scene.Provenance.PromptVersion == prompt.Version.ToString()
+                           && scene.Provenance.PromptSha256 == prompt.Sha256
+                           && scene.Provenance.ModelName == configuration.QwenModel);
+            }
+            catch (Exception exception) when (exception is JsonException or IOException or InvalidDataException)
+            {
+                return false;
+            }
+        }
 
         public async Task<PipelineCheckpoint> ExecuteAsync(Guid projectId, CancellationToken cancellationToken)
         {
-            var faces = await LoadAsync<FaceContinuityManifest>(
-                Path.Combine(root, "manifests", "face-continuity.json"),
-                cancellationToken).ConfigureAwait(false);
-            var text = await LoadAsync<VisualTextAnalysisManifest>(
-                Path.Combine(root, "manifests", "visual-text-analysis.json"),
-                cancellationToken).ConfigureAwait(false);
             await using var runtime = runtimeFactory();
             var sceneProgress = new InlineProgress<VisualAnalysisProgress>(item => progress?.Report(new(
                 Phase,
                 item.CompletedScenes,
                 item.TotalScenes,
                 item.Announcement)));
-            var packages = visual.Scenes.Select(scene => new VisualAnalysisPackage(
-                scene,
-                scene.Keyframes.ToDictionary(
-                    frame => frame.EvidenceId,
-                    frame => Path.Combine(root, frame.RelativeImagePath.Replace('/', Path.DirectorySeparatorChar)),
-                    StringComparer.Ordinal),
-                audio.Transcript
-                    .Where(segment => scene.TranscriptSegmentIds.Contains(segment.SegmentId, StringComparer.Ordinal))
-                    .ToDictionary(segment => segment.SegmentId, segment => segment.Text, StringComparer.Ordinal),
-                faces.Entities,
-                text.Scenes.FirstOrDefault(item => item.SceneId == scene.SceneId)?.ReconciledReadings ?? [],
-                faces.Observations.Where(item => item.SceneId == scene.SceneId).ToArray()))
-                .ToArray();
+            var packages = await BuildPackagesAsync(cancellationToken).ConfigureAwait(false);
             var analyses = await new VisualAnalysisCoordinator(
                     runtime,
                     configuration.QwenModel,
@@ -279,6 +318,29 @@ public sealed class CreatorVisualUnderstandingWorkflow(
                 cancellationToken).ConfigureAwait(false);
             return await CompleteAsync(projectId, Phase, root, "manifests/visual-analysis-complete.json", timeProvider, cancellationToken)
                 .ConfigureAwait(false);
+        }
+
+        private async Task<VisualAnalysisPackage[]> BuildPackagesAsync(CancellationToken cancellationToken)
+        {
+            var faces = await LoadAsync<FaceContinuityManifest>(
+                Path.Combine(root, "manifests", "face-continuity.json"),
+                cancellationToken).ConfigureAwait(false);
+            var text = await LoadAsync<VisualTextAnalysisManifest>(
+                Path.Combine(root, "manifests", "visual-text-analysis.json"),
+                cancellationToken).ConfigureAwait(false);
+            return visual.Scenes.Select(scene => new VisualAnalysisPackage(
+                scene,
+                scene.Keyframes.ToDictionary(
+                    frame => frame.EvidenceId,
+                    frame => Path.Combine(root, frame.RelativeImagePath.Replace('/', Path.DirectorySeparatorChar)),
+                    StringComparer.Ordinal),
+                audio.Transcript
+                    .Where(segment => scene.TranscriptSegmentIds.Contains(segment.SegmentId, StringComparer.Ordinal))
+                    .ToDictionary(segment => segment.SegmentId, segment => segment.Text, StringComparer.Ordinal),
+                faces.Entities,
+                text.Scenes.FirstOrDefault(item => item.SceneId == scene.SceneId)?.ReconciledReadings ?? [],
+                faces.Observations.Where(item => item.SceneId == scene.SceneId).ToArray()))
+                .ToArray();
         }
     }
 

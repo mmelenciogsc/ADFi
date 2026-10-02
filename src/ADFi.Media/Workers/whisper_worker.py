@@ -9,7 +9,10 @@ import sys
 
 
 def emit(value):
-    sys.stdout.write(json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n")
+    # The worker protocol must remain independent of the Windows console code page. JSON Unicode
+    # escapes round-trip to the original text in .NET and prevent cp1252/charmap failures when a
+    # transcript contains characters not representable by the active legacy console encoding.
+    sys.stdout.write(json.dumps(value, ensure_ascii=True, separators=(",", ":")) + "\n")
     sys.stdout.flush()
 
 

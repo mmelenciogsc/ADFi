@@ -41,3 +41,19 @@ The downloaded Piper assets were hashed after installation:
 
 This smoke evidence does not replace the required 5-, 15-, and 60-minute 1080p end-to-end matrix,
 JAWS/NVDA acceptance testing, per-voice listening review, or full source-to-final render validation.
+
+## Licensed three-minute end-to-end diagnostics
+
+After the component smoke checks, two licensed real-film excerpts completed Phases 0–12 through the
+same production services used by the desktop app. Sintel processed 23 transcript segments and 14
+visual scenes; Tears of Steel processed 39 transcript segments and 13 visual scenes. Their respective
+Phases 3–5 times were 5 minutes 33.181 seconds and 6 minutes 1.491 seconds on the automatically
+selected constrained Qwen tier. Final rendering took 9.975 and 11.558 seconds, stream-copied both
+H.264 video streams and produced exactly 180-second outputs that passed complete FFmpeg decode and
+artifact-hash verification.
+
+Neither excerpt contained a verified narration-safe gap of at least two seconds once dialogue and
+meaningful source sound were protected, so both correctly produced zero AD cues. This proves the
+pipeline fails conservatively rather than forcing narration, but it is not a narration-quality demo.
+Inputs, commands, measurements, output paths, hashes and limitations are in
+[Licensed real-media diagnostics](../REAL-MEDIA-DIAGNOSTICS.md).

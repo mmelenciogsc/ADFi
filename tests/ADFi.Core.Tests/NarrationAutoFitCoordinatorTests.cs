@@ -32,6 +32,7 @@ public sealed class NarrationAutoFitCoordinatorTests
         Assert.Equal("She pockets the key.", result.Segment.Text);
         Assert.Equal(1, runtime.GenerationCount);
         Assert.Equal(1, runtime.UnloadCount);
+        Assert.Contains("maximumWords", runtime.LastRequest!.UserPrompt, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -48,6 +49,36 @@ public sealed class NarrationAutoFitCoordinatorTests
         await Assert.ThrowsAsync<InvalidDataException>(() => coordinator.FitAsync(
             Segment(), "voice-1", TimeSpan.FromMilliseconds(250), TestContext.Current.CancellationToken));
         Assert.Equal(1, runtime.UnloadCount);
+    }
+
+    [Fact]
+    public async Task NonShorteningRewriteEndsAsUserReviewInsteadOfFailingProject()
+    {
+        var original = Segment();
+        var escaped = System.Text.Json.JsonSerializer.Serialize(original.Text);
+        var runtime = new RewriteRuntime(
+            $"{{\"text\":{escaped},\"evidenceIds\":[\"frame-1\",\"frame-2\"]}}");
+        var synth = new DurationSynthesizer(
+            TimeSpan.FromSeconds(4),
+            TimeSpan.FromSeconds(4),
+            TimeSpan.FromSeconds(4));
+        var coordinator = new NarrationAutoFitCoordinator(
+            synth,
+            runtime,
+            "qwen3-vl:4b-instruct",
+            Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_AD_WRITER_SYSTEM.md"));
+
+        var result = await coordinator.FitAsync(
+            original,
+            "voice-1",
+            TimeSpan.FromMilliseconds(250),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.RequiresUserReview);
+        Assert.False(result.Fit.Fits);
+        Assert.Equal(NarrationTimingPolicy.MaximumAutoFitAttempts, result.SynthesisAttempts);
+        Assert.Equal(original.Text, result.Segment.Text);
+        Assert.Equal(NarrationTimingPolicy.MaximumAutoFitAttempts - 1, runtime.GenerationCount);
     }
 
     private static AdSegment Segment() => new(
@@ -96,12 +127,14 @@ public sealed class NarrationAutoFitCoordinatorTests
         public string RuntimeName => "test-runtime";
         public int GenerationCount { get; private set; }
         public int UnloadCount { get; private set; }
+        public LocalModelRequest? LastRequest { get; private set; }
 
         public Task EnsureModelAvailableAsync(string modelName, CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task<LocalModelResponse> GenerateAsync(string modelName, LocalModelRequest request, CancellationToken cancellationToken)
         {
             GenerationCount++;
+            LastRequest = request;
             return Task.FromResult(new LocalModelResponse(response, modelName, TimeSpan.Zero));
         }
 

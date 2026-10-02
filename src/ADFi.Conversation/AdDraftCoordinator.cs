@@ -1,6 +1,6 @@
-using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using ADFi.Core;
 using ADFi.LocalAI;
 using ADFi.Media;
@@ -98,7 +98,8 @@ public sealed class AdDraftCoordinator(
         PromptResource prompt,
         CancellationToken cancellationToken)
     {
-        AdDraftResponse? previous = null;
+        AdDraftResponse? shortest = null;
+        string? shortestModel = null;
         var usable = package.Opportunity.Window.Duration - TimeSpan.FromMilliseconds(250);
         for (var attempt = 1; attempt <= NarrationTimingPolicy.MaximumAutoFitAttempts; attempt++)
         {
@@ -117,8 +118,9 @@ public sealed class AdDraftCoordinator(
                     DisplayName = entity.DisplayNameAt(package.Opportunity.Window.Start),
                 }),
                 maximumWords = maxWords,
-                priorOverlongDraft = previous?.Text,
+                priorOverlongDraft = shortest?.Text,
                 attempt,
+                instruction = $"Write no more than {maxWords} spoken words. Preserve only the most essential supported action or state. The word limit is mandatory.",
             });
             var response = await runtime.GenerateAsync(
                 modelName,
@@ -132,11 +134,24 @@ public sealed class AdDraftCoordinator(
                 return candidate with { Model = response.Model };
             }
 
-            previous = candidate;
+            if (shortest is null || CountWords(candidate.Text) < CountWords(shortest.Text))
+            {
+                shortest = candidate;
+                shortestModel = response.Model;
+            }
         }
 
-        throw new InvalidOperationException("AD_DRAFT_EXCEEDS_ESTIMATED_WINDOW");
+        // The measured Piper phase owns the final timing decision and flags an unresolved
+        // overrun for user review. Keep the shortest evidence-valid proposal after the
+        // bounded retries instead of aborting the entire resumable project.
+        return (shortest ?? throw new InvalidOperationException("AD_DRAFT_GENERATION_FAILED")) with
+        {
+            Model = shortestModel,
+        };
     }
+
+    private static int CountWords(string text) =>
+        text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
 
     private static AdSegment ValidateAndCreate(
         AdDraftPackage package,

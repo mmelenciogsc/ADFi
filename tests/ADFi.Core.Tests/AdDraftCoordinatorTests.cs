@@ -1,6 +1,7 @@
 using ADFi.Conversation;
 using ADFi.Core;
 using ADFi.LocalAI;
+using ADFi.Media;
 
 namespace ADFi.Core.Tests;
 
@@ -107,6 +108,47 @@ public sealed class AdDraftCoordinatorTests
             Assert.Equal("She pockets a key.", Assert.Single(resumed).Text);
             Assert.Equal(0, resumedRuntime.GenerationCount);
             Assert.False(resumedRuntime.Unloaded);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AllOverlongDraftsReturnShortestForMeasuredNarrationReview()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"adfi-draft-overrun-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            List<string> responseTexts =
+            [
+                "A winged creature rapidly descends toward a person lying motionless on the ground.",
+                "A winged creature descends toward a person on the ground.",
+                "A creature descends toward someone on the ground.",
+            ];
+            var responses = responseTexts.Select(text =>
+                $"{{\"text\":\"{text}\",\"evidenceIds\":[\"frame-1\"],\"uncertainty\":null,\"reason\":\"Visible action\"}}")
+                .ToArray();
+            var runtime = new QueueRuntime(responses);
+            var coordinator = new AdDraftCoordinator(
+                runtime,
+                "qwen-test",
+                Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_AD_WRITER_SYSTEM.md"));
+            var opportunity = new ProposedAdInterval(
+                "short", "scene-1", new(TimeSpan.Zero, TimeSpan.FromSeconds(1.25)), 1_250,
+                ["frame-1"], [], "Visible action", 1m, 1m);
+            var fact = new VisualFact(
+                "fact", "scene-1", "A creature descends.", 1m, 1m, false,
+                TimeSpan.Zero, null, ["frame-1"]);
+
+            var result = await coordinator.DraftAsync(
+                Guid.NewGuid(), root, [new(opportunity, [fact], [], [])], TestContext.Current.CancellationToken);
+
+            Assert.Equal("A creature descends toward someone on the ground.", Assert.Single(result).Text);
+            Assert.Equal(NarrationTimingPolicy.MaximumAutoFitAttempts, runtime.GenerationCount);
+            Assert.True(runtime.Unloaded);
         }
         finally
         {

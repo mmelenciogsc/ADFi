@@ -147,10 +147,16 @@ public static class SceneIntervalBuilder
     public static IReadOnlyList<MediaInterval> Build(
         TimeSpan mediaDuration,
         IEnumerable<TimeSpan> boundaries,
-        TimeSpan minimumSceneDuration)
+        TimeSpan minimumSceneDuration,
+        TimeSpan? maximumSceneDuration = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(mediaDuration, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThan(minimumSceneDuration, TimeSpan.Zero);
+        if (maximumSceneDuration is { } configuredMaximum
+            && (configuredMaximum <= TimeSpan.Zero || configuredMaximum < minimumSceneDuration))
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumSceneDuration));
+        }
         var accepted = boundaries
             .Where(time => time > TimeSpan.Zero && time < mediaDuration)
             .Order()
@@ -168,6 +174,13 @@ public static class SceneIntervalBuilder
         var start = TimeSpan.Zero;
         foreach (var end in accepted.Append(mediaDuration))
         {
+            while (maximumSceneDuration is { } maximum && end - start > maximum)
+            {
+                var boundedEnd = start + maximum;
+                scenes.Add(new(start, boundedEnd));
+                start = boundedEnd;
+            }
+
             scenes.Add(new(start, end));
             start = end;
         }

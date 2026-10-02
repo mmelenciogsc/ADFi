@@ -31,4 +31,20 @@ public sealed class ScenePolicyTests
 
         Assert.Equal([TimeSpan.FromSeconds(1)], boundaries);
     }
+
+    [Fact]
+    public void SceneIntervalsCapDurationWhenCutDetectionMissesTransitions()
+    {
+        var scenes = SceneIntervalBuilder.Build(
+            TimeSpan.FromSeconds(38),
+            [],
+            TimeSpan.FromMilliseconds(500),
+            TimeSpan.FromSeconds(15));
+
+        Assert.Equal(3, scenes.Count);
+        Assert.Equal(new(TimeSpan.Zero, TimeSpan.FromSeconds(15)), scenes[0]);
+        Assert.Equal(new(TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30)), scenes[1]);
+        Assert.Equal(new(TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(38)), scenes[2]);
+        Assert.All(scenes, scene => Assert.True(scene.Duration <= TimeSpan.FromSeconds(15)));
+    }
 }

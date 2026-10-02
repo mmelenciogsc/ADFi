@@ -72,6 +72,14 @@ public sealed class NarrationAutoFitCoordinator(
         await runtime.EnsureModelAvailableAsync(modelName, cancellationToken).ConfigureAwait(false);
         try
         {
+            var available = segment.Window.Duration - breathingRoom;
+            var currentWordCount = currentText.Split(
+                (char[]?)null,
+                StringSplitOptions.RemoveEmptyEntries).Length;
+            var maximumWords = Math.Max(
+                1,
+                (int)Math.Floor(currentWordCount * available.TotalMilliseconds
+                                / Math.Max(1, renderedDuration.TotalMilliseconds) * 0.9));
             var response = await runtime.GenerateAsync(
                 modelName,
                 new(
@@ -81,9 +89,10 @@ public sealed class NarrationAutoFitCoordinator(
                         operation = "AutoFitNarrationToWindow",
                         currentText,
                         requiredEvidenceIds = segment.EvidenceIds,
-                        maximumDurationMilliseconds = checked((long)(segment.Window.Duration - breathingRoom).TotalMilliseconds),
+                        maximumDurationMilliseconds = checked((long)available.TotalMilliseconds),
                         renderedDurationMilliseconds = checked((long)renderedDuration.TotalMilliseconds),
-                        instruction = "Shorten wording only. Preserve every supported essential fact and every evidence ID. Do not add facts.",
+                        maximumWords,
+                        instruction = $"Shorten wording to no more than {maximumWords} spoken words. Preserve the single most essential supported action or state and every evidence ID. Do not add facts. The word limit is mandatory.",
                     }),
                     [],
                     RewriteSchema,
@@ -99,7 +108,10 @@ public sealed class NarrationAutoFitCoordinator(
 
             if (rewrite.Text.Length >= currentText.Length)
             {
-                throw new InvalidDataException("Auto-fit did not shorten the narration.");
+                // A bounded model may be unable to produce a shorter evidence-preserving
+                // sentence. Keep the current text, finish the finite measurement attempts,
+                // and surface RequiresUserReview instead of aborting the whole project.
+                return currentText;
             }
 
             return rewrite.Text.Trim();

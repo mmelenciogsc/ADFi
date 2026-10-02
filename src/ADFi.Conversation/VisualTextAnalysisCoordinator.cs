@@ -26,7 +26,9 @@ public sealed record VisualTextAnalysisManifest(
     Guid ProjectId,
     string SourceSha256,
     IReadOnlyList<VisualTextSceneResult> Scenes,
-    DateTimeOffset CompletedAtUtc);
+    DateTimeOffset CompletedAtUtc,
+    string? PromptSha256 = null,
+    string? ModelName = null);
 
 /// <summary>
 /// Uses the VLM only on deterministically text-likely frames, unloads it, and then invokes
@@ -102,6 +104,7 @@ public sealed class VisualTextAnalysisCoordinator(
                         cancellationToken).ConfigureAwait(false);
                     var draft = JsonSerializer.Deserialize<VisualTextDraft>(response.Content, JsonOptions)
                                 ?? throw new InvalidDataException("The visual-text model returned no result.");
+                    draft = NormalizeCropRegions(draft);
                     ValidateDraft(scene, draft);
                     drafts.Add((scene, draft, new(
                         prompt.Id,
@@ -173,7 +176,9 @@ public sealed class VisualTextAnalysisCoordinator(
             projectId,
             sourceSha256,
             results,
-            timeProvider.GetUtcNow());
+            timeProvider.GetUtcNow(),
+            prompt.Sha256,
+            modelName);
         await WriteAsync(
             Path.Combine(projectDirectory, "manifests", "visual-text-analysis.json"),
             manifest,
@@ -208,6 +213,34 @@ public sealed class VisualTextAnalysisCoordinator(
                 throw new InvalidDataException("Visual-text analysis contains an invalid crop region.");
             }
         }
+    }
+
+    private static VisualTextDraft NormalizeCropRegions(VisualTextDraft draft)
+    {
+        var candidates = draft.Candidates.Select(candidate =>
+        {
+            if (candidate.Region is not { } region
+                || region.X < 0
+                || region.Y < 0
+                || region.X >= 1
+                || region.Y >= 1
+                || region.Width <= 0
+                || region.Height <= 0)
+            {
+                return candidate;
+            }
+
+            // Small models can return individually valid normalized coordinates whose sums
+            // cross the image edge through rounding (for example x=.82, width=.20). Clipping
+            // the rectangle to the actual frame preserves its evidence while remaining bounded.
+            var normalized = region with
+            {
+                Width = Math.Min(region.Width, 1 - region.X),
+                Height = Math.Min(region.Height, 1 - region.Y),
+            };
+            return candidate with { Region = normalized };
+        }).ToArray();
+        return draft with { Candidates = candidates };
     }
 
     private static ImageRegion CropRegion(KeyframeEvidence frame, NormalizedImageRegion region)

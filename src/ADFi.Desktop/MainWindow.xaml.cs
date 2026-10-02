@@ -724,7 +724,7 @@ public partial class MainWindow : Window, IDisposable
                     activeTier.OllamaModel,
                     Path.Combine(AppContext.BaseDirectory, "prompts", "ADFI_AD_WRITER_SYSTEM.md"),
                     voice.Id,
-                    TimeSpan.FromMilliseconds(900),
+                    TimeSpan.FromSeconds(2),
                     TimeSpan.FromMilliseconds(250)),
                 progress,
                 currentOperationCancellation.Token);

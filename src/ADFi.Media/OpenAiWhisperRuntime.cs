@@ -60,6 +60,8 @@ public sealed class OpenAiWhisperRuntime(WhisperRuntimeConfiguration configurati
         startInfo.ArgumentList.Add(configuration.Device);
         startInfo.ArgumentList.Add("--download-root");
         startInfo.ArgumentList.Add(Path.GetFullPath(configuration.ModelDirectory));
+        startInfo.Environment["PYTHONIOENCODING"] = "utf-8";
+        startInfo.Environment["PYTHONUTF8"] = "1";
         process = new Process { StartInfo = startInfo };
         if (!process.Start())
         {
@@ -105,7 +107,8 @@ public sealed class OpenAiWhisperRuntime(WhisperRuntimeConfiguration configurati
         var payload = response.Deserialize<WorkerResponse>(JsonOptions)
                       ?? throw new InvalidDataException("Whisper worker returned no transcription payload.");
         return (payload.Segments ?? [])
-            .Select((segment, index) => MapSegment(chunk, segment, index))
+            .Select((segment, index) => TryMapSegment(chunk, segment, index))
+            .OfType<TranscriptSegment>()
             .ToArray();
     }
 
@@ -190,18 +193,28 @@ public sealed class OpenAiWhisperRuntime(WhisperRuntimeConfiguration configurati
         }
     }
 
-    private static TranscriptSegment MapSegment(AudioChunk chunk, WorkerSegment segment, int index)
+    private static TranscriptSegment? TryMapSegment(AudioChunk chunk, WorkerSegment segment, int index)
     {
+        if (!double.IsFinite(segment.StartSeconds)
+            || !double.IsFinite(segment.EndSeconds)
+            || string.IsNullOrWhiteSpace(segment.Text))
+        {
+            return null;
+        }
+
         var start = chunk.SourceInterval.Start + TimeSpan.FromSeconds(segment.StartSeconds);
         var end = chunk.SourceInterval.Start + TimeSpan.FromSeconds(segment.EndSeconds);
         start = Max(start, chunk.SourceInterval.Start);
         end = Min(end, chunk.SourceInterval.End);
         if (end <= start)
         {
-            throw new InvalidDataException("Whisper returned a segment outside its audio chunk.");
+            // Whisper can return a zero-length tail segment or timestamps just beyond the decoded
+            // chunk boundary. That output carries no usable speech evidence, so discard only that
+            // segment instead of losing already-persisted and later valid chunks.
+            return null;
         }
 
-        var words = segment.Words
+        var words = (segment.Words ?? [])
             .Select(word => new
             {
                 Text = word.Text.Trim(),
@@ -248,7 +261,7 @@ public sealed class OpenAiWhisperRuntime(WhisperRuntimeConfiguration configurati
         [property: JsonPropertyName("startSeconds")] double StartSeconds,
         [property: JsonPropertyName("endSeconds")] double EndSeconds,
         [property: JsonPropertyName("confidence")] decimal? Confidence,
-        [property: JsonPropertyName("words")] IReadOnlyList<WorkerWord> Words);
+        [property: JsonPropertyName("words")] IReadOnlyList<WorkerWord>? Words);
 
     private sealed record WorkerWord(
         [property: JsonPropertyName("text")] string Text,

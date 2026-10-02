@@ -42,7 +42,14 @@ public sealed class VisualIndexService(TimeProvider timeProvider)
             maximumImageDimension,
             cancellationToken).ConfigureAwait(false);
         var boundaries = ShotBoundaryPolicy.Detect(candidates);
-        var intervals = SceneIntervalBuilder.Build(duration, boundaries, TimeSpan.FromMilliseconds(500));
+        // A missed visual cut must never produce a minute-long semantic scene represented by
+        // only a few early frames. The duration cap is a deterministic safety net; detected
+        // cuts still produce shorter scene ranges.
+        var intervals = SceneIntervalBuilder.Build(
+            duration,
+            boundaries,
+            TimeSpan.FromMilliseconds(500),
+            TimeSpan.FromSeconds(15));
         var root = Path.GetFullPath(projectDirectory);
         var framesDirectory = Path.Combine(root, "visual", "frames");
         Directory.CreateDirectory(framesDirectory);
