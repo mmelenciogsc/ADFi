@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using ADFi.Core;
+using ADFi.Conversation;
 using ADFi.Infrastructure;
 using ADFi.Infrastructure.Security;
 using ADFi.LocalAI;
@@ -462,6 +463,107 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    private async void RunVisualUnderstandingButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (LocalProjectsList.SelectedItem is not LocalProjectSummary project
+            || !entitlementVerified
+            || entitlement?.Plan != SubscriptionPlan.Creator)
+        {
+            Announce("Select a prepared local project with a current verified Creator subscription first.");
+            return;
+        }
+
+        if (currentOperationCancellation is not null)
+        {
+            Announce("Wait for the current local operation to finish or cancel it first.");
+            return;
+        }
+
+        var assessment = await hardwareProfileStore.LoadAsync(lifetimeCancellation.Token);
+        if (assessment is null)
+        {
+            Announce("Run the Creator hardware profile before visual understanding.");
+            RunHardwareProfileButton.Focus();
+            return;
+        }
+
+        currentOperationCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
+        SetLocalOperationState(running: true);
+        PipelineProgressBar.IsIndeterminate = false;
+        Announce("Resuming recurring-character, on-screen-text, and scene analysis from verified checkpoints.");
+        try
+        {
+            var resourceProfiler = new SystemHardwareProfiler(
+                project.ProjectDirectory,
+                new ProcessHardwareCommandRunner());
+            var (freeRamBytes, freeVramBytes) = await resourceProfiler.GetCurrentFreeResourcesAsync(
+                currentOperationCancellation.Token);
+            var activeTier = ModelTierPolicy.Select(assessment.Profile with
+            {
+                FreeSystemMemoryBytes = freeRamBytes,
+                FreeVideoMemoryBytes = freeVramBytes,
+            });
+            if (freeRamBytes < activeTier.MinimumFreeRamBytes)
+            {
+                throw new InvalidOperationException(
+                    "Not enough free memory for safe visual analysis. Close other applications, then resume this project.");
+            }
+
+            var openCvModels = Path.Combine(configuration.LocalModelRoot, "opencv");
+            var workflow = new CreatorVisualUnderstandingWorkflow(
+                new FilePipelineCheckpointStore(configuration.ProjectRoot),
+                TimeProvider.System,
+                () => new OpenCvFaceContinuityAnalyzer(
+                    Path.Combine(openCvModels, "face_detection_yunet_2023mar.onnx"),
+                    Path.Combine(openCvModels, "face_recognition_sface_2021dec.onnx")),
+                () => new OllamaModelRuntime(new HttpClient
+                {
+                    BaseAddress = new Uri("http://127.0.0.1:11434/"),
+                    Timeout = TimeSpan.FromMinutes(5),
+                }),
+                new TesseractProcessRunner());
+            var progress = new Progress<CreatorVisualUnderstandingProgress>(item =>
+            {
+                var fraction = item.TotalUnits <= 0
+                    ? 0
+                    : Math.Clamp((double)item.CompletedUnits / item.TotalUnits, 0, 1);
+                PipelineProgressBar.Value = Math.Clamp((int)item.Phase + fraction, 0, 14);
+                Announce(item.Announcement);
+                LogTechnical($"Project {project.ProjectId:D}: {item.Announcement}");
+            });
+            LogTechnical(
+                $"Project {project.ProjectId:D}: current resources select {activeTier.Name} visual bounds and {activeTier.OllamaModel}.");
+            var result = await workflow.RunAsync(
+                project.ProjectId,
+                project.ProjectDirectory,
+                new(
+                    activeTier.OllamaModel,
+                    Path.Combine(openCvModels, "face_detection_yunet_2023mar.onnx"),
+                    Path.Combine(openCvModels, "face_recognition_sface_2021dec.onnx"),
+                    ResolveTesseractPath(),
+                    Path.Combine(AppContext.BaseDirectory, "prompts", "ADFI_VISUAL_TEXT_SYSTEM.md"),
+                    Path.Combine(AppContext.BaseDirectory, "prompts", "ADFI_VISUAL_ANALYST_SYSTEM.md")),
+                progress,
+                currentOperationCancellation.Token);
+            await LoadLocalProjectsAsync(currentOperationCancellation.Token, project.ProjectId);
+            PipelineProgressBar.Value = 6;
+            Announce(
+                $"Visual understanding complete. {result.FaceContinuity.Clusters.Count} anonymous recurring people, " +
+                $"{result.VisualText.Scenes.Count} text-bearing scene results, and " +
+                $"{result.SceneAnalysis.Scenes.Count} evidence-grounded scene analyses are ready.");
+        }
+        catch (Exception exception)
+        {
+            ReportError("Visual understanding", exception);
+        }
+        finally
+        {
+            currentOperationCancellation.Dispose();
+            currentOperationCancellation = null;
+            SetLocalOperationState(running: false);
+        }
+    }
+
     private async void RefreshDiscoverButton_OnClick(object sender, RoutedEventArgs e)
     {
         await RefreshDiscoverAsync(announceResult: true, lifetimeCancellation.Token);
@@ -807,6 +909,13 @@ public partial class MainWindow : Window, IDisposable
                                          && LocalProjectsList.SelectedItem is LocalProjectSummary project
                                          && (project.LatestPhase < AdficationPhase.VisualSegmentationAndKeyframes
                                              || project.LatestStatus != CheckpointStatus.Complete);
+        RunVisualUnderstandingButton.IsEnabled = canCreate
+                                                 && selected
+                                                 && !operationRunning
+                                                 && LocalProjectsList.SelectedItem is LocalProjectSummary visualProject
+                                                 && visualProject.LatestPhase >= AdficationPhase.VisualSegmentationAndKeyframes
+                                                 && (visualProject.LatestPhase < AdficationPhase.VlmSceneAnalytics
+                                                     || visualProject.LatestStatus != CheckpointStatus.Complete);
         ReviewGroup.IsEnabled = selected;
         ConversationTextBox.IsEnabled = canReviewConversationally;
         SubmitConversationButton.IsEnabled = false;
@@ -873,4 +982,13 @@ public partial class MainWindow : Window, IDisposable
     }
 
     private static decimal ToGibibytes(long bytes) => bytes / (1024m * 1024m * 1024m);
+
+    private static string ResolveTesseractPath()
+    {
+        var installed = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            "Tesseract-OCR",
+            "tesseract.exe");
+        return File.Exists(installed) ? installed : "tesseract";
+    }
 }

@@ -35,6 +35,8 @@ segment; narration text is not placed on a process command line.
 
 After Phase 0 source validation, select the local project and activate **Run or resume audio and scene analysis**. ADFi rechecks free resources, verifies the immutable source, resumes valid per-chunk transcript work, unloads Whisper, and only then performs bounded OpenCV scene indexing. Cancellation preserves completed chunks/checkpoints; selecting the action again resumes rather than restarting verified work.
 
+Next, activate **Continue with characters, text, and scene understanding**. The local-AI installer obtains the pinned YuNet and SFace files from the official OpenCV Zoo media endpoint and refuses a hash mismatch. ADFi creates only anonymous project-local person clusters, limits Qwen text analysis to text-likely frames, invokes Tesseract only for justified focused crops, and then performs evidence-cited scene analysis. Each model is unloaded before the next heavyweight stage.
+
 ## Accessible first run
 
 Start JAWS 2025 or NVDA before ADFi. Keyboard focus begins in the native two-destination navigation. DISCOVER remains usable without login. Creator processing remains disabled until the user signs in, has a server-authoritative Creator entitlement, checks the rights/authorization attestation and selects an existing local video. The first Creator activation runs the accessible hardware profile and miniature benchmark before recommending a model tier.

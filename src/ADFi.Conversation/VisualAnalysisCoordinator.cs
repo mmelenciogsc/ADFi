@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ADFi.Core;
 using ADFi.LocalAI;
+using ADFi.Media;
 
 namespace ADFi.Conversation;
 
@@ -26,13 +27,18 @@ public sealed record VisualAnalysisPackage(
     VisualScene Scene,
     IReadOnlyDictionary<string, string> AbsoluteFramePaths,
     IReadOnlyDictionary<string, string> TranscriptContext,
-    IReadOnlyList<ProjectEntity> EstablishedEntities);
+    IReadOnlyList<ProjectEntity> EstablishedEntities,
+    IReadOnlyList<ReconciledOcr>? OcrContext = null,
+    IReadOnlyList<FaceObservation>? FaceContinuity = null);
+
+public sealed record VisualAnalysisProgress(int CompletedScenes, int TotalScenes, string Announcement);
 
 public sealed class VisualAnalysisCoordinator(
     ILocalModelRuntime runtime,
     string modelName,
     string analystPromptPath,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IProgress<VisualAnalysisProgress>? progress = null)
 {
     private const string OutputSchema =
         """
@@ -57,9 +63,11 @@ public sealed class VisualAnalysisCoordinator(
         var results = new List<VisualSceneAnalysis>(packages.Count);
         try
         {
-            foreach (var package in packages.OrderBy(item => item.Scene.SourceInterval.Start))
+            var ordered = packages.OrderBy(item => item.Scene.SourceInterval.Start).ToArray();
+            for (var index = 0; index < ordered.Length; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var package = ordered[index];
                 var response = await runtime.GenerateAsync(
                     modelName,
                     new(
@@ -74,6 +82,10 @@ public sealed class VisualAnalysisCoordinator(
                 var result = ValidateAndAttachProvenance(package, draft, prompt, response);
                 await PersistAsync(projectDirectory, result, cancellationToken).ConfigureAwait(false);
                 results.Add(result);
+                progress?.Report(new(
+                    index + 1,
+                    ordered.Length,
+                    $"Analyzing scene {index + 1} of {ordered.Length}."));
             }
         }
         finally
@@ -108,6 +120,17 @@ public sealed class VisualAnalysisCoordinator(
                 }),
             },
             transcript = package.TranscriptContext,
+            verifiedOnScreenText = package.OcrContext ?? [],
+            faceContinuity = (package.FaceContinuity ?? []).Select(face => new
+            {
+                face.EntityId,
+                face.FrameEvidenceId,
+                face.X,
+                face.Y,
+                face.Width,
+                face.Height,
+                face.MatchCertain,
+            }),
             establishedEntities = established,
             instruction = "Report only facts visible in the supplied ordered frames. Cite their evidence IDs. Identify what is not already conveyed by the supplied transcript or source-sound context.",
         });

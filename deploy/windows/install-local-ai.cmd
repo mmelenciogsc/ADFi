@@ -23,6 +23,8 @@ if not exist "%ADFI_PYTHON%\Scripts\python.exe" py -3.12 -m venv "%ADFI_PYTHON%"
 "%ADFI_PYTHON%\Scripts\python.exe" -m piper.download_voices ^
   --data-dir "%ADFI_PIPER_VOICES%" ^
   en_GB-cori-high en_US-ljspeech-high en_US-bryce-medium en_US-joe-medium en_US-sam-medium || exit /b 1
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass ^
+  -File deploy\windows\install-opencv-models.ps1 || exit /b 1
 
 where ffmpeg >nul 2>nul || echo WARNING: FFmpeg is not on PATH.
 where ffprobe >nul 2>nul || echo WARNING: ffprobe is not on PATH.
@@ -31,5 +33,6 @@ where tesseract >nul 2>nul || if not exist "%ProgramFiles%\Tesseract-OCR\tessera
 
 echo Local Python runtime installed at %ADFI_PYTHON%
 echo Piper voice files installed at %ADFI_PIPER_VOICES%
+echo Verified OpenCV face-continuity models installed under %LOCALAPPDATA%\ADFi\models\opencv
 echo Ollama and Whisper model files are installed separately and verified by release manifest.
 endlocal

@@ -1,4 +1,5 @@
 using ADFi.Media;
+using OpenCvSharp;
 
 namespace ADFi.Core.Tests;
 
@@ -44,5 +45,42 @@ public sealed class FaceContinuityTests
 
         Assert.NotNull(match);
         Assert.False(match.IsCertain);
+    }
+
+    [Fact]
+    public void InstalledOpenCvZooModelsLoadThroughMaintainedApis()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var modelRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "ADFi",
+            "models",
+            "opencv");
+        var detector = Path.Combine(modelRoot, "face_detection_yunet_2023mar.onnx");
+        var recognizer = Path.Combine(modelRoot, "face_recognition_sface_2021dec.onnx");
+        if (!File.Exists(detector) || !File.Exists(recognizer))
+        {
+            return;
+        }
+
+        var imagePath = Path.Combine(Path.GetTempPath(), $"adfi-face-smoke-{Guid.NewGuid():N}.png");
+        try
+        {
+            using (var image = new Mat(240, 320, MatType.CV_8UC3, Scalar.Black))
+            {
+                Cv2.ImWrite(imagePath, image);
+            }
+
+            using var analyzer = new OpenCvFaceContinuityAnalyzer(detector, recognizer);
+            Assert.Empty(analyzer.DetectAndEmbed("frame-smoke", imagePath));
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
     }
 }

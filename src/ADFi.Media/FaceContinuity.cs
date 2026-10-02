@@ -19,6 +19,33 @@ public sealed record FaceCluster(
 
 public sealed record FaceClusterMatch(string EntityId, decimal CosineSimilarity, bool IsCertain);
 
+public interface IFaceContinuityAnalyzer : IDisposable
+{
+    IReadOnlyList<DetectedFace> DetectAndEmbed(string frameEvidenceId, string imagePath);
+}
+
+public sealed record FaceObservation(
+    string DetectionId,
+    string SceneId,
+    string FrameEvidenceId,
+    TimeSpan SourceTime,
+    string EntityId,
+    int X,
+    int Y,
+    int Width,
+    int Height,
+    decimal DetectorConfidence,
+    decimal? MatchSimilarity,
+    bool MatchCertain);
+
+public sealed record FaceContinuityManifest(
+    Guid ProjectId,
+    string SourceSha256,
+    IReadOnlyList<FaceObservation> Observations,
+    IReadOnlyList<FaceCluster> Clusters,
+    IReadOnlyList<ADFi.Core.ProjectEntity> Entities,
+    DateTimeOffset CompletedAtUtc);
+
 public static class FaceContinuityPolicy
 {
     public const decimal ConservativeCosineThreshold = 0.45m;
@@ -77,7 +104,7 @@ public static class FaceContinuityPolicy
     }
 }
 
-public sealed class OpenCvFaceContinuityAnalyzer : IDisposable
+public sealed class OpenCvFaceContinuityAnalyzer : IFaceContinuityAnalyzer
 {
     private readonly string detectorModelPath;
     private readonly Net recognizer;
@@ -196,6 +223,172 @@ public sealed class OpenCvFaceContinuityAnalyzer : IDisposable
         for (var index = 0; index < values.Length; index++)
         {
             values[index] = (float)(values[index] / magnitude);
+        }
+    }
+}
+
+public sealed class FaceContinuityIndexService(
+    Func<IFaceContinuityAnalyzer> analyzerFactory,
+    TimeProvider timeProvider,
+    IProgress<(int Completed, int Total, string Announcement)>? progress = null)
+{
+    private static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+    };
+
+    public async Task<FaceContinuityManifest> BuildAsync(
+        Guid projectId,
+        string sourceSha256,
+        VisualIndexManifest visualIndex,
+        string projectDirectory,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceSha256);
+        ArgumentNullException.ThrowIfNull(visualIndex);
+        if (visualIndex.ProjectId != projectId
+            || !string.Equals(visualIndex.SourceSha256, sourceSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("The face-continuity input does not match the selected project.");
+        }
+
+        var frames = visualIndex.Scenes
+            .SelectMany(scene => scene.Keyframes.Select(frame => (Scene: scene, Frame: frame)))
+            .OrderBy(item => item.Frame.SourceTime)
+            .ToArray();
+        var mutableClusters = new List<MutableCluster>();
+        var observations = new List<FaceObservation>();
+        using var analyzer = analyzerFactory();
+        for (var frameIndex = 0; frameIndex < frames.Length; frameIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var item = frames[frameIndex];
+            var framePath = Path.Combine(
+                Path.GetFullPath(projectDirectory),
+                item.Frame.RelativeImagePath.Replace('/', Path.DirectorySeparatorChar));
+            foreach (var face in analyzer.DetectAndEmbed(item.Frame.EvidenceId, framePath))
+            {
+                var snapshot = mutableClusters.Select(cluster => cluster.ToImmutable()).ToArray();
+                var match = FaceContinuityPolicy.Match(face.Embedding, snapshot);
+                MutableCluster cluster;
+                if (match is { IsCertain: true })
+                {
+                    cluster = mutableClusters.Single(value => value.EntityId == match.EntityId);
+                    cluster.Add(face.Embedding, item.Frame.SourceTime);
+                }
+                else
+                {
+                    cluster = new MutableCluster(
+                        $"Person_{mutableClusters.Count + 1:D2}",
+                        face.Embedding,
+                        item.Frame.SourceTime);
+                    mutableClusters.Add(cluster);
+                }
+
+                observations.Add(new(
+                    face.DetectionId,
+                    item.Scene.SceneId,
+                    face.FrameEvidenceId,
+                    item.Frame.SourceTime,
+                    cluster.EntityId,
+                    face.BoundingBox.X,
+                    face.BoundingBox.Y,
+                    face.BoundingBox.Width,
+                    face.BoundingBox.Height,
+                    face.DetectorConfidence,
+                    match?.CosineSimilarity,
+                    match?.IsCertain ?? false));
+            }
+
+            progress?.Report((
+                frameIndex + 1,
+                frames.Length,
+                $"Checking recurring characters, frame {frameIndex + 1} of {frames.Length}."));
+        }
+
+        var clusters = mutableClusters.Select(item => item.ToImmutable()).ToArray();
+        var entities = clusters.Select(item => new ADFi.Core.ProjectEntity(
+            item.EntityId,
+            ADFi.Core.EntityKind.Person,
+            item.EntityId.Replace('_', ' '),
+            [])).ToArray();
+        var manifest = new FaceContinuityManifest(
+            projectId,
+            sourceSha256,
+            observations,
+            clusters,
+            entities,
+            timeProvider.GetUtcNow());
+        var path = Path.Combine(Path.GetFullPath(projectDirectory), "manifests", "face-continuity.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporary = path + ".partial";
+        await using (var stream = File.Create(temporary))
+        {
+            await System.Text.Json.JsonSerializer.SerializeAsync(
+                stream,
+                manifest,
+                JsonOptions,
+                cancellationToken).ConfigureAwait(false);
+            await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        File.Move(temporary, path, overwrite: true);
+        return manifest;
+    }
+
+    private sealed class MutableCluster
+    {
+        private float[] centroid;
+
+        public MutableCluster(string entityId, IReadOnlyList<float> embedding, TimeSpan sourceTime)
+        {
+            EntityId = entityId;
+            centroid = embedding.ToArray();
+            ObservationCount = 1;
+            FirstSeen = sourceTime;
+            LastSeen = sourceTime;
+        }
+
+        public string EntityId { get; }
+
+        public int ObservationCount { get; private set; }
+
+        public TimeSpan FirstSeen { get; }
+
+        public TimeSpan LastSeen { get; private set; }
+
+        public void Add(IReadOnlyList<float> embedding, TimeSpan sourceTime)
+        {
+            if (embedding.Count != centroid.Length)
+            {
+                throw new InvalidDataException("A face embedding changed dimensions within the project.");
+            }
+
+            for (var index = 0; index < centroid.Length; index++)
+            {
+                centroid[index] = (centroid[index] * ObservationCount + embedding[index]) / (ObservationCount + 1);
+            }
+
+            Normalize(centroid);
+            ObservationCount++;
+            LastSeen = sourceTime;
+        }
+
+        public FaceCluster ToImmutable() =>
+            new(EntityId, centroid.ToArray(), ObservationCount, FirstSeen, LastSeen);
+
+        private static void Normalize(float[] values)
+        {
+            var magnitude = Math.Sqrt(values.Sum(value => value * value));
+            if (magnitude == 0)
+            {
+                return;
+            }
+
+            for (var index = 0; index < values.Length; index++)
+            {
+                values[index] = (float)(values[index] / magnitude);
+            }
         }
     }
 }
