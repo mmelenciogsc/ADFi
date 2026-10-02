@@ -213,6 +213,14 @@
                                         HorizontalAlignment="Left"
                                         Click="OpenLocalProjectButton_OnClick"
                                         AutomationProperties.Name="Open selected local project for review" />
+                                <Button x:Name="RunPreparationButton"
+                                        Content="_Run or resume audio and scene analysis"
+                                        TabIndex="19"
+                                        IsEnabled="False"
+                                        HorizontalAlignment="Left"
+                                        Click="RunPreparationButton_OnClick"
+                                        AutomationProperties.Name="Run or resume audio transcription and visual scene indexing"
+                                        AutomationProperties.HelpText="Runs the next two bounded stages sequentially, saves each transcript chunk, unloads Whisper, then builds the keyframe scene index." />
                                 <ProgressBar x:Name="PipelineProgressBar"
                                              Height="22"
                                              Margin="4"
@@ -230,21 +238,21 @@
                                 <Label Target="{Binding ElementName=DescriptionsList}" Content="Audio _descriptions" />
                                 <ListBox x:Name="DescriptionsList"
                                          MinHeight="90"
-                                         TabIndex="19"
+                                         TabIndex="20"
                                          AutomationProperties.Name="Audio description segments" />
                                 <Label Target="{Binding ElementName=ConversationTextBox}" Content="Project _request" />
                                 <TextBox x:Name="ConversationTextBox"
-                                         TabIndex="20"
+                                         TabIndex="21"
                                          AutomationProperties.Name="Natural conversation project request"
                                          AutomationProperties.HelpText="Enter one request. ADFi will plan compound requests as dependency-safe atomic tasks." />
                                 <WrapPanel>
                                     <Button x:Name="SubmitConversationButton"
                                             Content="_Submit request"
-                                            TabIndex="21"
+                                            TabIndex="22"
                                             IsEnabled="False"
                                             AutomationProperties.Name="Submit project request" />
                                     <Button Content="Play _around selection"
-                                            TabIndex="22"
+                                            TabIndex="23"
                                             IsEnabled="False"
                                             AutomationProperties.Name="Play preview around selected description" />
                                 </WrapPanel>
@@ -258,7 +266,7 @@
                                 <TextBlock Text="On hold or disputed: unavailable until account services are connected" TextWrapping="Wrap" />
                                 <TextBlock Text="Lifetime earnings: unavailable until account services are connected" TextWrapping="Wrap" />
                                 <Button Content="View earnings _details"
-                                        TabIndex="23"
+                                        TabIndex="24"
                                         IsEnabled="False"
                                         HorizontalAlignment="Left"
                                         AutomationProperties.Name="View explainable earnings details" />
@@ -267,12 +275,12 @@
 
                         <Expander Header="Technical activity"
                                   Margin="4"
-                                  TabIndex="24"
+                                  TabIndex="25"
                                   AutomationProperties.Name="Technical activity for advanced users">
                             <TextBox x:Name="TechnicalActivityTextBox"
                                      Margin="8"
                                      MinHeight="110"
-                                     TabIndex="25"
+                                     TabIndex="26"
                                      IsReadOnly="True"
                                      AcceptsReturn="True"
                                      TextWrapping="Wrap"
@@ -303,7 +311,7 @@
                     <WrapPanel Grid.Row="2" Margin="0,0,0,8">
                         <Button x:Name="RefreshDiscoverButton"
                                 Content="_Refresh DISCOVER"
-                                TabIndex="26"
+                                TabIndex="27"
                                 Click="RefreshDiscoverButton_OnClick"
                                 AutomationProperties.Name="Refresh public ADFied works" />
                         <TextBlock x:Name="DiscoverStateText"
@@ -314,7 +322,7 @@
                     </WrapPanel>
                     <ListView Grid.Row="3"
                               x:Name="DiscoverProjects"
-                              TabIndex="27"
+                              TabIndex="28"
                               AutomationProperties.Name="Public ADFied works"
                               AutomationProperties.HelpText="Use arrow keys to select a work. Open it to use the official YouTube player on its ADFi page."
                               SelectionMode="Single"
@@ -337,20 +345,20 @@
                     <WrapPanel Grid.Row="4" Margin="0,8,0,0">
                         <Button x:Name="OpenDiscoverProjectButton"
                                 Content="_Open selected ADFi page"
-                                TabIndex="28"
+                                TabIndex="29"
                                 IsEnabled="False"
                                 Click="OpenDiscoverProjectButton_OnClick"
                                 AutomationProperties.Name="Open selected ADFi project page in the default browser"
                                 AutomationProperties.HelpText="The project page uses the official YouTube player." />
                         <Button x:Name="CopyDiscoverProjectButton"
                                 Content="_Copy selected project page"
-                                TabIndex="29"
+                                TabIndex="30"
                                 IsEnabled="False"
                                 Click="CopyDiscoverProjectButton_OnClick"
                                 AutomationProperties.Name="Copy selected ADFi project page address" />
                         <Button x:Name="OpenDiscoverViewerButton"
                                 Content="Open in accessible _viewer"
-                                TabIndex="30"
+                                TabIndex="31"
                                 IsEnabled="False"
                                 Click="OpenDiscoverViewerButton_OnClick"
                                 AutomationProperties.Name="Open selected ADFi publication in the Accessible Interactive Video Viewer"

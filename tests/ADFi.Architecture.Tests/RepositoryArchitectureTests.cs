@@ -40,6 +40,7 @@ public sealed class RepositoryArchitectureTests
             "RunHardwareProfileButton",
             "SelectLocalVideoButton",
             "LocalProjectsList",
+            "RunPreparationButton",
             "PipelineProgressBar",
             "DescriptionsList",
             "ConversationTextBox",
@@ -70,7 +71,7 @@ public sealed class RepositoryArchitectureTests
             .Where(value => value is not null)
             .Select(value => int.Parse(value!, System.Globalization.CultureInfo.InvariantCulture))
             .ToArray();
-        Assert.Equal(Enumerable.Range(1, 30), tabIndices.Order());
+        Assert.Equal(Enumerable.Range(1, 31), tabIndices.Order());
     }
 
     [Fact]

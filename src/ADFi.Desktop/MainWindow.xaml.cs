@@ -360,6 +360,108 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    private async void RunPreparationButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (LocalProjectsList.SelectedItem is not LocalProjectSummary project
+            || !entitlementVerified
+            || entitlement?.Plan != SubscriptionPlan.Creator)
+        {
+            Announce("Select a local project with a current verified Creator subscription first.");
+            return;
+        }
+
+        if (currentOperationCancellation is not null)
+        {
+            Announce("Wait for the current local operation to finish or cancel it first.");
+            return;
+        }
+
+        var assessment = await hardwareProfileStore.LoadAsync(lifetimeCancellation.Token);
+        if (assessment is null)
+        {
+            Announce("Run the Creator hardware profile before audio and scene analysis.");
+            RunHardwareProfileButton.Focus();
+            return;
+        }
+
+        currentOperationCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
+        SetLocalOperationState(running: true);
+        PipelineProgressBar.IsIndeterminate = false;
+        Announce("Resuming from the last verified checkpoint. Heavyweight stages run one at a time.");
+        try
+        {
+            var resourceProfiler = new SystemHardwareProfiler(
+                project.ProjectDirectory,
+                new ProcessHardwareCommandRunner());
+            var (freeRamBytes, freeVramBytes) = await resourceProfiler.GetCurrentFreeResourcesAsync(
+                currentOperationCancellation.Token);
+            var currentProfile = assessment.Profile with
+            {
+                FreeSystemMemoryBytes = freeRamBytes,
+                FreeVideoMemoryBytes = freeVramBytes,
+            };
+            var activeTier = ModelTierPolicy.Select(currentProfile);
+            if (freeRamBytes < activeTier.MinimumFreeRamBytes)
+            {
+                throw new InvalidOperationException(
+                    "Not enough free memory for safe local processing. Close other applications, then resume this project.");
+            }
+
+            LogTechnical(
+                $"Project {project.ProjectId:D}: current free resources select {activeTier.Name} bounds; " +
+                $"Whisper remains CPU-only and unloads before OpenCV indexing.");
+            var pythonExecutable = Path.Combine(
+                configuration.LocalAiRuntimeRoot,
+                "python",
+                "Scripts",
+                "python.exe");
+            var workerPath = Path.Combine(AppContext.BaseDirectory, "Workers", "whisper_worker.py");
+            var modelDirectory = Path.Combine(configuration.LocalModelRoot, "whisper");
+            var workflow = new CreatorPreparationWorkflow(
+                new FilePipelineCheckpointStore(configuration.ProjectRoot),
+                TimeProvider.System,
+                () => new OpenAiWhisperRuntime(new(
+                    pythonExecutable,
+                    workerPath,
+                    modelDirectory)));
+            var progress = new Progress<CreatorPreparationProgress>(item =>
+            {
+                var fraction = item.TotalUnits <= 0
+                    ? 0
+                    : Math.Clamp((double)item.CompletedUnits / item.TotalUnits, 0, 1);
+                PipelineProgressBar.Value = Math.Clamp((int)item.Phase + fraction, 0, 14);
+                Announce(item.Announcement);
+                LogTechnical($"Project {project.ProjectId:D}: {item.Announcement}");
+            });
+            var result = await workflow.RunAsync(
+                project.ProjectId,
+                project.ProjectDirectory,
+                new(
+                    "ffmpeg",
+                    new(pythonExecutable, workerPath, modelDirectory),
+                    WhisperModelPolicy.Select(freeRamBytes),
+                    activeTier.MaximumImageDimension,
+                    activeTier.MaximumTemporalFrames),
+                progress,
+                currentOperationCancellation.Token);
+            await LoadLocalProjectsAsync(currentOperationCancellation.Token, project.ProjectId);
+            PipelineProgressBar.Value = 3;
+            Announce(
+                $"Audio analysis and scene index complete. {result.AudioAnalysis.Transcript.Count} transcript segments and " +
+                $"{result.VisualIndex.Scenes.Count} visual scenes are ready for recurring-character and text analysis.");
+        }
+        catch (Exception exception)
+        {
+            ReportError("Audio and scene analysis", exception);
+        }
+        finally
+        {
+            currentOperationCancellation.Dispose();
+            currentOperationCancellation = null;
+            SetLocalOperationState(running: false);
+        }
+    }
+
     private async void RefreshDiscoverButton_OnClick(object sender, RoutedEventArgs e)
     {
         await RefreshDiscoverAsync(announceResult: true, lifetimeCancellation.Token);
@@ -699,6 +801,12 @@ public partial class MainWindow : Window, IDisposable
             entitlementVerified,
             rightsAccepted) && !operationRunning;
         OpenLocalProjectButton.IsEnabled = selected && !operationRunning;
+        RunPreparationButton.IsEnabled = canCreate
+                                         && selected
+                                         && !operationRunning
+                                         && LocalProjectsList.SelectedItem is LocalProjectSummary project
+                                         && (project.LatestPhase < AdficationPhase.VisualSegmentationAndKeyframes
+                                             || project.LatestStatus != CheckpointStatus.Complete);
         ReviewGroup.IsEnabled = selected;
         ConversationTextBox.IsEnabled = canReviewConversationally;
         SubmitConversationButton.IsEnabled = false;

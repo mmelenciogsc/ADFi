@@ -53,6 +53,17 @@ public interface IPipelinePhase
     Task<PipelineCheckpoint> ExecuteAsync(Guid projectId, CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Lets a resumable phase verify that its persisted output still matches the completed
+/// checkpoint. Phases without a verifier retain the original checkpoint-only behavior.
+/// </summary>
+public interface IVerifiedPipelinePhase : IPipelinePhase
+{
+    Task<bool> VerifyCheckpointAsync(
+        PipelineCheckpoint checkpoint,
+        CancellationToken cancellationToken);
+}
+
 public sealed record PipelineProgress(
     AdficationPhase Phase,
     CheckpointStatus Status,
@@ -74,10 +85,18 @@ public sealed class SequentialPipelineCoordinator(
     public async Task RunAsync(Guid projectId, CancellationToken cancellationToken)
     {
         var checkpoints = await checkpointStore.LoadAsync(projectId, cancellationToken).ConfigureAwait(false);
-        var completed = checkpoints
-            .Where(checkpoint => checkpoint.Status == CheckpointStatus.Complete)
-            .Select(checkpoint => checkpoint.Phase)
-            .ToHashSet();
+        var completed = new HashSet<AdficationPhase>();
+        foreach (var checkpoint in checkpoints.Where(item => item.Status == CheckpointStatus.Complete))
+        {
+            var phase = orderedPhases.SingleOrDefault(item => item.Phase == checkpoint.Phase);
+            if (phase is IVerifiedPipelinePhase verifier
+                && !await verifier.VerifyCheckpointAsync(checkpoint, cancellationToken).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            completed.Add(checkpoint.Phase);
+        }
 
         for (var index = 0; index < orderedPhases.Length; index++)
         {

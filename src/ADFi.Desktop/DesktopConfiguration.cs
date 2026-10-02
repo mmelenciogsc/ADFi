@@ -7,7 +7,9 @@ public sealed record DesktopConfiguration(
     string ProjectRoot,
     string ProtectedCredentialRoot,
     string HardwareProfileRoot,
-    string ViewerEvidenceRoot)
+    string ViewerEvidenceRoot,
+    string LocalAiRuntimeRoot,
+    string LocalModelRoot)
 {
     public static DesktopConfiguration Load()
     {
@@ -32,7 +34,9 @@ public sealed record DesktopConfiguration(
             Path.Combine(root, "Projects"),
             Path.Combine(root, "Secure"),
             Path.Combine(root, "Hardware"),
-            Path.Combine(root, "PrivateViewerEvidence"));
+            Path.Combine(root, "PrivateViewerEvidence"),
+            Path.Combine(root, "runtime"),
+            Path.Combine(root, "models"));
     }
 
     private static Uri EnsureTrailingSlash(Uri value) =>

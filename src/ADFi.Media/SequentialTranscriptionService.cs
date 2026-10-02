@@ -15,11 +15,21 @@ public interface IWhisperRuntime : IAsyncDisposable
     Task UnloadAsync(CancellationToken cancellationToken);
 }
 
+public sealed record TranscriptionProgress(
+    int CompletedChunks,
+    int TotalChunks,
+    string Announcement);
+
 public sealed class SequentialTranscriptionService(
     IWhisperRuntime whisperRuntime,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IProgress<TranscriptionProgress>? progress = null)
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true,
+    };
 
     public async Task<IReadOnlyList<TranscriptSegment>> TranscribeAsync(
         AudioPreparationManifest manifest,
@@ -29,12 +39,39 @@ public sealed class SequentialTranscriptionService(
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(manifest);
-        await whisperRuntime.LoadAsync(modelName, cancellationToken).ConfigureAwait(false);
         var segments = new List<TranscriptSegment>();
+        var pending = new List<(AudioChunk Chunk, int Index)>();
+        for (var index = 0; index < manifest.Chunks.Count; index++)
+        {
+            var chunk = manifest.Chunks[index];
+            var restored = await TryLoadChunkResultAsync(projectDirectory, chunk, cancellationToken)
+                .ConfigureAwait(false);
+            if (restored is null)
+            {
+                pending.Add((chunk, index));
+            }
+            else
+            {
+                segments.AddRange(restored);
+                progress?.Report(new(
+                    index + 1,
+                    manifest.Chunks.Count,
+                    $"Restored transcript chunk {index + 1} of {manifest.Chunks.Count}."));
+            }
+        }
+
+        var loaded = false;
         try
         {
-            foreach (var chunk in manifest.Chunks)
+            if (pending.Count > 0)
             {
+                await whisperRuntime.LoadAsync(modelName, cancellationToken).ConfigureAwait(false);
+                loaded = true;
+            }
+
+            foreach (var pendingChunk in pending)
+            {
+                var chunk = pendingChunk.Chunk;
                 cancellationToken.ThrowIfCancellationRequested();
                 var chunkPath = Path.Combine(
                     Path.GetFullPath(projectDirectory),
@@ -47,11 +84,18 @@ public sealed class SequentialTranscriptionService(
                     chunk.ChunkId,
                     result,
                     cancellationToken).ConfigureAwait(false);
+                progress?.Report(new(
+                    pendingChunk.Index + 1,
+                    manifest.Chunks.Count,
+                    $"Transcribing chunk {pendingChunk.Index + 1} of {manifest.Chunks.Count} complete."));
             }
         }
         finally
         {
-            await whisperRuntime.UnloadAsync(CancellationToken.None).ConfigureAwait(false);
+            if (loaded)
+            {
+                await whisperRuntime.UnloadAsync(CancellationToken.None).ConfigureAwait(false);
+            }
         }
 
         var merged = TranscriptMerger.Merge(segments, mediaDuration);
@@ -70,15 +114,53 @@ public sealed class SequentialTranscriptionService(
         return merged;
     }
 
+    private static async Task<IReadOnlyList<TranscriptSegment>?> TryLoadChunkResultAsync(
+        string projectDirectory,
+        AudioChunk chunk,
+        CancellationToken cancellationToken)
+    {
+        var path = ChunkResultPath(projectDirectory, chunk.ChunkId);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            await using var stream = File.OpenRead(path);
+            var segments = await JsonSerializer.DeserializeAsync<List<TranscriptSegment>>(
+                stream,
+                JsonOptions,
+                cancellationToken).ConfigureAwait(false);
+            if (segments is null || segments.Any(segment =>
+                    !string.Equals(segment.ChunkId, chunk.ChunkId, StringComparison.Ordinal)
+                    || segment.SourceInterval.Start < chunk.SourceInterval.Start
+                    || segment.SourceInterval.End > chunk.SourceInterval.End
+                    || segment.SourceInterval.End <= segment.SourceInterval.Start))
+            {
+                return null;
+            }
+
+            return segments;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private static Task PersistChunkResultAsync(
         string projectDirectory,
         string chunkId,
         IReadOnlyList<TranscriptSegment> segments,
         CancellationToken cancellationToken) =>
         WriteJsonAtomicallyAsync(
-            Path.Combine(projectDirectory, "transcript", "chunks", $"{chunkId}.json"),
+            ChunkResultPath(projectDirectory, chunkId),
             segments,
             cancellationToken);
+
+    private static string ChunkResultPath(string projectDirectory, string chunkId) =>
+        Path.Combine(projectDirectory, "transcript", "chunks", $"{chunkId}.json");
 
     private static async Task WriteJsonAtomicallyAsync<T>(
         string path,
