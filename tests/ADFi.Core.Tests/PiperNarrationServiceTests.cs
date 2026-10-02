@@ -68,6 +68,36 @@ public sealed class PiperNarrationServiceTests
     }
 
     [Fact]
+    public async Task CorruptCachedAudioIsRegeneratedInsteadOfTrusted()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"adfi-piper-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var runner = new WaveWritingRunner(TimeSpan.FromSeconds(1));
+            var service = new PiperNarrationService(
+                new PiperConfiguration("python", root),
+                Path.Combine(root, "cache"),
+                runner);
+            var request = new NarrationSynthesisRequest(
+                "segment-1", "A concise description.", "voice-1",
+                TimeSpan.FromSeconds(3), TimeSpan.FromMilliseconds(250), 1);
+            var first = await service.SynthesizeAsync(request, TestContext.Current.CancellationToken);
+            await File.WriteAllBytesAsync(first.AudioPath, [1, 2, 3], TestContext.Current.CancellationToken);
+
+            var repaired = await service.SynthesizeAsync(request, TestContext.Current.CancellationToken);
+
+            Assert.False(repaired.ReusedCachedAudio);
+            Assert.Equal(TimeSpan.FromSeconds(1), repaired.MeasuredDuration);
+            Assert.Equal(2, runner.InvocationCount);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void CatalogContainsFiveReviewedVoicesAndNoNonCommercialLicense()
     {
         Assert.Equal(5, PiperVoiceCatalog.All.Count);

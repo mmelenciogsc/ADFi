@@ -43,11 +43,11 @@ public sealed record AdSegment(
     string PromptSha256,
     string? NarrationAssetRelativePath,
     TimeSpan? MeasuredNarrationDuration,
-    bool UserApproved);
+    bool UserApproved,
+    string? InputFingerprint = null);
 
 public sealed record ProjectValidationIssue(
     string Code,
     string Message,
     bool Blocking,
     string? SegmentId);
-

@@ -20,16 +20,26 @@ public static class AdNecessityPolicy
                 .Where(fact => fact.SceneId == scene.SceneId)
                 .Where(fact => !fact.AlreadyConveyedBySourceAudio)
                 .Where(fact => fact.Importance >= MinimumImportance && fact.Certainty >= MinimumCertainty)
-                .Where(fact => fact.SpoilerSafeAfter is null || fact.SpoilerSafeAfter <= scene.SourceInterval.Start)
+                .Where(fact => fact.SpoilerSafeAfter is null || fact.SpoilerSafeAfter < scene.SourceInterval.End)
                 .ToArray();
             if (essentialFacts.Length == 0)
             {
                 continue;
             }
 
+            // A description cannot truthfully precede the latest visual fact it contains.
+            // This also prevents narration from starting while the scene transition or
+            // evidence sequence that establishes the fact is still unfolding.
+            var factsAvailableAt = essentialFacts.Max(fact =>
+                fact.SpoilerSafeAfter is { } spoilerSafeAfter && spoilerSafeAfter > fact.AvailableFrom
+                    ? spoilerSafeAfter
+                    : fact.AvailableFrom);
             var window = quietWindows
                 .Where(candidate => candidate.Overlaps(scene.SourceInterval))
                 .Select(candidate => Intersect(candidate, scene.SourceInterval))
+                .Select(candidate => new MediaInterval(
+                    candidate.Start > factsAvailableAt ? candidate.Start : factsAvailableAt,
+                    candidate.End))
                 .Where(candidate => candidate.Duration >= minimumWindow)
                 .OrderByDescending(candidate => candidate.Duration)
                 .FirstOrDefault();
@@ -56,4 +66,3 @@ public static class AdNecessityPolicy
     private static MediaInterval Intersect(MediaInterval left, MediaInterval right) =>
         new(left.Start > right.Start ? left.Start : right.Start, left.End < right.End ? left.End : right.End);
 }
-

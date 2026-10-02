@@ -29,6 +29,7 @@ public partial class MainWindow : Window, IDisposable
     private DesktopEntitlement? entitlement;
     private bool entitlementVerified;
     private CancellationTokenSource? currentOperationCancellation;
+    private System.Windows.Media.MediaPlayer? narrationVoicePreviewPlayer;
     private bool disposed;
 
     public MainWindow()
@@ -49,6 +50,8 @@ public partial class MainWindow : Window, IDisposable
         hardwareProfileStore = new CreatorHardwareProfileStore(
             configuration.HardwareProfileRoot,
             configuration.ProjectRoot);
+        NarrationVoiceComboBox.ItemsSource = PiperVoiceCatalog.All;
+        NarrationVoiceComboBox.SelectedIndex = 0;
     }
 
     private async void MainWindow_OnLoaded(object sender, RoutedEventArgs e)
@@ -77,6 +80,7 @@ public partial class MainWindow : Window, IDisposable
         disposed = true;
         lifetimeCancellation.Cancel();
         currentOperationCancellation?.Cancel();
+        narrationVoicePreviewPlayer?.Close();
         lifetimeCancellation.Dispose();
         httpClient.Dispose();
         GC.SuppressFinalize(this);
@@ -564,6 +568,165 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    private async void PreviewNarrationVoiceButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!entitlementVerified
+            || entitlement?.Plan != SubscriptionPlan.Creator
+            || NarrationVoiceComboBox.SelectedItem is not PiperVoice voice)
+        {
+            Announce("A current verified Creator subscription and narration voice are required.");
+            return;
+        }
+
+        if (currentOperationCancellation is not null)
+        {
+            Announce("Wait for the current local operation to finish or cancel it first.");
+            return;
+        }
+
+        currentOperationCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
+        SetLocalOperationState(running: true);
+        Announce($"Creating a short preview for {voice.AccessibleName}.");
+        try
+        {
+            var service = new PiperNarrationService(
+                new(ResolveLocalAiPythonPath(), Path.Combine(configuration.LocalModelRoot, "piper")),
+                Path.Combine(configuration.LocalAiRuntimeRoot, "voice-preview-cache"),
+                new PiperProcessRunner());
+            var preview = await service.SynthesizeAsync(
+                new(
+                    "voice-preview",
+                    "ADFi describes each important visual moment clearly and concisely.",
+                    voice.Id,
+                    TimeSpan.FromSeconds(12),
+                    TimeSpan.FromMilliseconds(250),
+                    1),
+                currentOperationCancellation.Token);
+            narrationVoicePreviewPlayer?.Close();
+            narrationVoicePreviewPlayer = new System.Windows.Media.MediaPlayer();
+            narrationVoicePreviewPlayer.Open(new Uri(preview.AudioPath, UriKind.Absolute));
+            narrationVoicePreviewPlayer.Play();
+            Announce($"Playing {voice.AccessibleName} preview.");
+        }
+        catch (Exception exception)
+        {
+            ReportError("Narration voice preview", exception);
+        }
+        finally
+        {
+            currentOperationCancellation.Dispose();
+            currentOperationCancellation = null;
+            SetLocalOperationState(running: false);
+        }
+    }
+
+    private async void RunDraftNarrationButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (LocalProjectsList.SelectedItem is not LocalProjectSummary project
+            || !entitlementVerified
+            || entitlement?.Plan != SubscriptionPlan.Creator
+            || project.LatestPhase < AdficationPhase.VlmSceneAnalytics
+            || NarrationVoiceComboBox.SelectedItem is not PiperVoice voice)
+        {
+            Announce("Select a visually analyzed project and narration voice with a current Creator subscription first.");
+            return;
+        }
+
+        if (currentOperationCancellation is not null)
+        {
+            Announce("Wait for the current local operation to finish or cancel it first.");
+            return;
+        }
+
+        var assessment = await hardwareProfileStore.LoadAsync(lifetimeCancellation.Token);
+        if (assessment is null)
+        {
+            Announce("Run the Creator hardware profile before description drafting.");
+            RunHardwareProfileButton.Focus();
+            return;
+        }
+
+        currentOperationCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
+        SetLocalOperationState(running: true);
+        PipelineProgressBar.IsIndeterminate = false;
+        Announce("Selecting necessary descriptions, then drafting and narrating one segment at a time.");
+        try
+        {
+            var resourceProfiler = new SystemHardwareProfiler(
+                project.ProjectDirectory,
+                new ProcessHardwareCommandRunner());
+            var (freeRamBytes, freeVramBytes) = await resourceProfiler.GetCurrentFreeResourcesAsync(
+                currentOperationCancellation.Token);
+            var activeTier = ModelTierPolicy.Select(assessment.Profile with
+            {
+                FreeSystemMemoryBytes = freeRamBytes,
+                FreeVideoMemoryBytes = freeVramBytes,
+            });
+            if (freeRamBytes < activeTier.MinimumFreeRamBytes)
+            {
+                throw new InvalidOperationException(
+                    "Not enough free memory for safe drafting. Close other applications, then resume this project.");
+            }
+
+            var workflow = new CreatorDraftNarrationWorkflow(
+                new FilePipelineCheckpointStore(configuration.ProjectRoot),
+                TimeProvider.System,
+                () => new OllamaModelRuntime(new HttpClient
+                {
+                    BaseAddress = new Uri("http://127.0.0.1:11434/"),
+                    Timeout = TimeSpan.FromMinutes(5),
+                }),
+                root => new PiperNarrationService(
+                    new(ResolveLocalAiPythonPath(), Path.Combine(configuration.LocalModelRoot, "piper")),
+                    Path.Combine(root, "narration", "cache"),
+                    new PiperProcessRunner()));
+            var progress = new Progress<CreatorDraftNarrationProgress>(item =>
+            {
+                var fraction = item.TotalUnits <= 0
+                    ? 0
+                    : Math.Clamp((double)item.CompletedUnits / item.TotalUnits, 0, 1);
+                PipelineProgressBar.Value = Math.Clamp((int)item.Phase + fraction, 0, 14);
+                Announce(item.Announcement);
+                LogTechnical($"Project {project.ProjectId:D}: {item.Announcement}");
+            });
+            LogTechnical(
+                $"Project {project.ProjectId:D}: drafting uses {activeTier.OllamaModel}; " +
+                "Piper and Qwen operations remain sequential.");
+            var result = await workflow.RunAsync(
+                project.ProjectId,
+                project.ProjectDirectory,
+                new(
+                    activeTier.OllamaModel,
+                    Path.Combine(AppContext.BaseDirectory, "prompts", "ADFI_AD_WRITER_SYSTEM.md"),
+                    voice.Id,
+                    TimeSpan.FromMilliseconds(900),
+                    TimeSpan.FromMilliseconds(250)),
+                progress,
+                currentOperationCancellation.Token);
+            await PersistInitialDraftAsync(project, result, currentOperationCancellation.Token);
+            await LoadLocalProjectsAsync(currentOperationCancellation.Token, project.ProjectId);
+            DescriptionsList.ItemsSource = result.Narration.Segments.Select(item =>
+                $"{FormatTime(item.Segment.Window.Start)} to {FormatTime(item.Segment.Window.End)}. {item.Segment.Text}").ToArray();
+            PipelineProgressBar.Value = 9;
+            var reviewCount = result.Narration.Segments.Count(item => item.RequiresUserReview);
+            Announce(
+                $"Audio description draft and measured narration complete. {result.Narration.Segments.Count} segments are ready; " +
+                (reviewCount == 0
+                    ? "all fit their validated windows."
+                    : $"{reviewCount} require timing review before finalization."));
+        }
+        catch (Exception exception)
+        {
+            ReportError("Description drafting and narration", exception);
+        }
+        finally
+        {
+            currentOperationCancellation.Dispose();
+            currentOperationCancellation = null;
+            SetLocalOperationState(running: false);
+        }
+    }
+
     private async void RefreshDiscoverButton_OnClick(object sender, RoutedEventArgs e)
     {
         await RefreshDiscoverAsync(announceResult: true, lifetimeCancellation.Token);
@@ -916,6 +1079,17 @@ public partial class MainWindow : Window, IDisposable
                                                  && visualProject.LatestPhase >= AdficationPhase.VisualSegmentationAndKeyframes
                                                  && (visualProject.LatestPhase < AdficationPhase.VlmSceneAnalytics
                                                      || visualProject.LatestStatus != CheckpointStatus.Complete);
+        NarrationVoiceComboBox.IsEnabled = canCreate && !operationRunning;
+        PreviewNarrationVoiceButton.IsEnabled = canCreate
+                                                && !operationRunning
+                                                && NarrationVoiceComboBox.SelectedItem is PiperVoice;
+        RunDraftNarrationButton.IsEnabled = canCreate
+                                            && selected
+                                            && !operationRunning
+                                            && LocalProjectsList.SelectedItem is LocalProjectSummary draftProject
+                                            && draftProject.LatestPhase >= AdficationPhase.VlmSceneAnalytics
+                                            && (draftProject.LatestPhase < AdficationPhase.PiperNarrationAndTimingValidation
+                                                || draftProject.LatestStatus != CheckpointStatus.Complete);
         ReviewGroup.IsEnabled = selected;
         ConversationTextBox.IsEnabled = canReviewConversationally;
         SubmitConversationButton.IsEnabled = false;
@@ -991,4 +1165,76 @@ public partial class MainWindow : Window, IDisposable
             "tesseract.exe");
         return File.Exists(installed) ? installed : "tesseract";
     }
+
+    private string ResolveLocalAiPythonPath() => Path.Combine(
+        configuration.LocalAiRuntimeRoot,
+        "python",
+        "Scripts",
+        "python.exe");
+
+    private async Task PersistInitialDraftAsync(
+        LocalProjectSummary project,
+        CreatorDraftNarrationResult result,
+        CancellationToken cancellationToken)
+    {
+        var store = new FileProjectVersionStore(configuration.ProjectRoot);
+        var current = await store.LoadCurrentAsync(project.ProjectId, cancellationToken);
+        var segments = result.Narration.Segments.Select(item => item.Segment).ToArray();
+        if (!string.Equals(current.SourceSha256, result.Narration.SourceSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("The generated draft does not belong to the selected immutable source.");
+        }
+
+        if (current.AdSegments.Count > 0)
+        {
+            if (current.NarrationVoiceId == result.Narration.VoiceId
+                && SegmentsMatch(current.AdSegments, segments))
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                "The project already contains a review draft. A resumed pipeline will not overwrite reviewed project state.");
+        }
+
+        var now = TimeProvider.System.GetUtcNow();
+        var next = current with
+        {
+            Version = current.Version + 1,
+            AdSegments = segments,
+            NarrationVoiceId = result.Narration.VoiceId,
+            UpdatedAtUtc = now,
+            RestoredFromVersion = null,
+        };
+        await store.AppendAsync(
+            next,
+            new(
+                Guid.NewGuid(),
+                project.ProjectId,
+                current.Version,
+                next.Version,
+                ProjectMutationKind.GenerateInitialDraft,
+                "Generated initial evidence-grounded draft and measured Piper narration.",
+                now),
+            current.Version,
+            cancellationToken);
+    }
+
+    private static bool SegmentsMatch(
+        IReadOnlyList<AdSegment> left,
+        AdSegment[] right) =>
+        left.Count == right.Length
+        && left.Zip(right).All(pair =>
+            pair.First.SegmentId == pair.Second.SegmentId
+            && pair.First.SceneId == pair.Second.SceneId
+            && pair.First.Window == pair.Second.Window
+            && pair.First.Text == pair.Second.Text
+            && pair.First.EvidenceIds.SequenceEqual(pair.Second.EvidenceIds, StringComparer.Ordinal)
+            && pair.First.PromptId == pair.Second.PromptId
+            && pair.First.PromptVersion == pair.Second.PromptVersion
+            && pair.First.PromptSha256 == pair.Second.PromptSha256
+            && pair.First.NarrationAssetRelativePath == pair.Second.NarrationAssetRelativePath
+            && pair.First.MeasuredNarrationDuration == pair.Second.MeasuredNarrationDuration
+            && pair.First.UserApproved == pair.Second.UserApproved
+            && pair.First.InputFingerprint == pair.Second.InputFingerprint);
 }

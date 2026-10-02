@@ -86,16 +86,25 @@ public sealed class SequentialPipelineCoordinator(
     {
         var checkpoints = await checkpointStore.LoadAsync(projectId, cancellationToken).ConfigureAwait(false);
         var completed = new HashSet<AdficationPhase>();
-        foreach (var checkpoint in checkpoints.Where(item => item.Status == CheckpointStatus.Complete))
+        var resumableChainIsValid = true;
+        foreach (var phase in orderedPhases)
         {
-            var phase = orderedPhases.SingleOrDefault(item => item.Phase == checkpoint.Phase);
-            if (phase is IVerifiedPipelinePhase verifier
-                && !await verifier.VerifyCheckpointAsync(checkpoint, cancellationToken).ConfigureAwait(false))
+            var checkpoint = checkpoints.SingleOrDefault(item =>
+                item.Phase == phase.Phase && item.Status == CheckpointStatus.Complete);
+            if (!resumableChainIsValid || checkpoint is null)
             {
+                resumableChainIsValid = false;
                 continue;
             }
 
-            completed.Add(checkpoint.Phase);
+            if (phase is IVerifiedPipelinePhase verifier
+                && !await verifier.VerifyCheckpointAsync(checkpoint, cancellationToken).ConfigureAwait(false))
+            {
+                resumableChainIsValid = false;
+                continue;
+            }
+
+            completed.Add(phase.Phase);
         }
 
         for (var index = 0; index < orderedPhases.Length; index++)

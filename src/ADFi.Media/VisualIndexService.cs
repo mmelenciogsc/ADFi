@@ -129,12 +129,29 @@ public sealed class VisualIndexService(TimeProvider timeProvider)
                     .Replace(Path.DirectorySeparatorChar, '/');
                 var absolute = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
                 var temporary = Path.Combine(framesDirectory, $".{Guid.NewGuid():N}.partial.jpg");
-                if (!Cv2.ImWrite(temporary, frame, [new ImageEncodingParam(ImwriteFlags.JpegQuality, 92)]))
+                Cv2.ImEncode(
+                    ".jpg",
+                    frame,
+                    out var encoded,
+                    [new ImageEncodingParam(ImwriteFlags.JpegQuality, 92)]);
+                if (encoded.Length == 0)
                 {
                     throw new InvalidOperationException("OpenCV could not encode a selected keyframe.");
                 }
 
-                File.Move(temporary, absolute, overwrite: true);
+                try
+                {
+                    File.WriteAllBytes(temporary, encoded);
+                    File.Move(temporary, absolute, overwrite: true);
+                }
+                finally
+                {
+                    if (File.Exists(temporary))
+                    {
+                        File.Delete(temporary);
+                    }
+                }
+
                 var nearest = candidates.MinBy(candidate => Math.Abs((candidate.SourceTime - time).Ticks));
                 var hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(absolute))).ToLowerInvariant();
                 keyframes.Add(new(

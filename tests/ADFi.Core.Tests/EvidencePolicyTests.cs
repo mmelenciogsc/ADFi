@@ -60,6 +60,28 @@ public sealed class EvidencePolicyTests
     }
 
     [Fact]
+    public void AdOpportunityNeverStartsBeforeItsLatestCitedVisualFact()
+    {
+        var scene = new VisualScene(
+            "scene-1",
+            new(TimeSpan.Zero, TimeSpan.FromSeconds(8)),
+            [new("frame-1", TimeSpan.FromSeconds(3), "frames/1.jpg", 640, 360, 0, 0, false)],
+            [],
+            []);
+        var fact = new VisualFact(
+            "fact-1", "scene-1", "A hand places a key on the table.", 0.9m, 0.95m, false,
+            TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(4), ["frame-1"]);
+
+        var proposed = AdNecessityPolicy.Propose(
+            [scene],
+            [fact],
+            [new(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(7))],
+            TimeSpan.FromSeconds(1));
+
+        Assert.Equal(TimeSpan.FromSeconds(4), Assert.Single(proposed).Window.Start);
+    }
+
+    [Fact]
     public void FinalValidationRejectsOverlapMissingEvidenceAndOverrun()
     {
         var segments = new[]
@@ -101,4 +123,3 @@ public sealed class EvidencePolicyTests
             TimeSpan.FromSeconds(renderedSeconds),
             false);
 }
-

@@ -95,10 +95,14 @@ public sealed class PiperNarrationService(
         var cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"piper-cli-v1\n{voice.ModelName}\n{request.Text}"))).ToLowerInvariant();
         var outputPath = Path.Combine(Path.GetFullPath(cacheDirectory), cacheKey + ".wav");
-        var reused = File.Exists(outputPath);
+        var hashPath = outputPath + ".sha256";
+        var reused = await IsValidCachedAudioAsync(outputPath, hashPath, cancellationToken).ConfigureAwait(false);
         if (!reused)
         {
+            File.Delete(outputPath);
+            File.Delete(hashPath);
             var partialPath = outputPath + ".partial";
+            var hashPartialPath = hashPath + ".partial";
             var inputPath = outputPath + ".input.txt";
             try
             {
@@ -123,7 +127,14 @@ public sealed class PiperNarrationService(
                         $"PIPER_SYNTHESIS_FAILED: {Sanitize(result.StandardError)}");
                 }
 
+                _ = WaveDurationReader.Measure(partialPath);
                 File.Move(partialPath, outputPath, overwrite: true);
+                await File.WriteAllTextAsync(
+                    hashPartialPath,
+                    await ComputeSha256Async(outputPath, cancellationToken).ConfigureAwait(false),
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                    cancellationToken).ConfigureAwait(false);
+                File.Move(hashPartialPath, hashPath, overwrite: true);
             }
             finally
             {
@@ -136,6 +147,11 @@ public sealed class PiperNarrationService(
                 {
                     File.Delete(inputPath);
                 }
+
+                if (File.Exists(hashPartialPath))
+                {
+                    File.Delete(hashPartialPath);
+                }
             }
         }
 
@@ -146,6 +162,42 @@ public sealed class PiperNarrationService(
             request.BreathingRoom,
             request.AutoFitAttempt);
         return new(request.SegmentId, outputPath, duration, fit, reused, voice);
+    }
+
+    private static async Task<bool> IsValidCachedAudioAsync(
+        string outputPath,
+        string hashPath,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(outputPath) || !File.Exists(hashPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var expected = (await File.ReadAllTextAsync(hashPath, cancellationToken).ConfigureAwait(false)).Trim();
+            var actual = await ComputeSha256Async(outputPath, cancellationToken).ConfigureAwait(false);
+            return expected.Length == 64
+                   && string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase)
+                   && WaveDurationReader.Measure(outputPath) > TimeSpan.Zero;
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static async Task<string> ComputeSha256Async(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false));
     }
 
     private static string Sanitize(string value)

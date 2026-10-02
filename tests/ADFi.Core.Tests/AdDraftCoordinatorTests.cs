@@ -77,6 +77,43 @@ public sealed class AdDraftCoordinatorTests
         }
     }
 
+    [Fact]
+    public async Task InterruptedDraftRunReusesValidatedSegmentWithoutLoadingModel()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"adfi-draft-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var opportunity = new ProposedAdInterval(
+                "00001", "scene-1", new(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(4)),
+                3_000, ["frame-1"], [], "Important action", 0.9m, 0.95m);
+            var package = new AdDraftPackage(
+                opportunity,
+                [new("fact-1", "scene-1", "She pockets a key.", 0.9m, 0.95m, false,
+                    TimeSpan.FromSeconds(1), null, ["frame-1"])],
+                [],
+                []);
+            var prompt = Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_AD_WRITER_SYSTEM.md");
+            var firstRuntime = new QueueRuntime(
+                "{\"text\":\"She pockets a key.\",\"evidenceIds\":[\"frame-1\"],\"uncertainty\":null,\"reason\":\"Important action\"}");
+            _ = await new AdDraftCoordinator(firstRuntime, "qwen-test", prompt).DraftAsync(
+                Guid.NewGuid(), root, [package], TestContext.Current.CancellationToken);
+            File.Delete(Path.Combine(root, "manifests", "ad-draft-complete.json"));
+
+            var resumedRuntime = new QueueRuntime();
+            var resumed = await new AdDraftCoordinator(resumedRuntime, "qwen-test", prompt).DraftAsync(
+                Guid.NewGuid(), root, [package], TestContext.Current.CancellationToken);
+
+            Assert.Equal("She pockets a key.", Assert.Single(resumed).Text);
+            Assert.Equal(0, resumedRuntime.GenerationCount);
+            Assert.False(resumedRuntime.Unloaded);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

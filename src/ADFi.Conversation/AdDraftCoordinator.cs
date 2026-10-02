@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using ADFi.Core;
 using ADFi.LocalAI;
 using ADFi.Media;
@@ -11,10 +13,18 @@ public sealed record AdDraftPackage(
     IReadOnlyList<string> NearbyDialogue,
     IReadOnlyList<ProjectEntity> Entities);
 
+public sealed record AdDraftCompletionManifest(
+    Guid ProjectId,
+    IReadOnlyList<AdSegment> Segments,
+    string? SourceSha256 = null,
+    string? OpportunityManifestSha256 = null,
+    string? FaceContinuitySha256 = null);
+
 public sealed class AdDraftCoordinator(
     ILocalModelRuntime runtime,
     string modelName,
-    string writerPromptPath)
+    string writerPromptPath,
+    IProgress<(int Completed, int Total, string Announcement)>? progress = null)
 {
     private const string OutputSchema =
         """
@@ -35,23 +45,47 @@ public sealed class AdDraftCoordinator(
     {
         var prompt = await PromptResourceLoader.LoadAsync(writerPromptPath, cancellationToken)
             .ConfigureAwait(false);
-        await runtime.EnsureModelAvailableAsync(modelName, cancellationToken).ConfigureAwait(false);
         var segments = new List<AdSegment>(packages.Count);
+        var modelLoaded = false;
         try
         {
-            foreach (var package in packages.OrderBy(item => item.Opportunity.Window.Start))
+            var ordered = packages.OrderBy(item => item.Opportunity.Window.Start).ToArray();
+            for (var index = 0; index < ordered.Length; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var package = ordered[index];
+                var existing = await TryLoadExistingAsync(
+                    projectDirectory,
+                    package,
+                    prompt,
+                    cancellationToken).ConfigureAwait(false);
+                if (existing is not null)
+                {
+                    segments.Add(existing);
+                    progress?.Report((index + 1, ordered.Length, $"Drafting description {index + 1} of {ordered.Length}."));
+                    continue;
+                }
+
+                if (!modelLoaded)
+                {
+                    await runtime.EnsureModelAvailableAsync(modelName, cancellationToken).ConfigureAwait(false);
+                    modelLoaded = true;
+                }
+
                 var draft = await GenerateFittingDraftAsync(projectId, package, prompt, cancellationToken)
                     .ConfigureAwait(false);
                 var segment = ValidateAndCreate(package, draft, prompt);
                 await PersistAsync(projectDirectory, segment, cancellationToken).ConfigureAwait(false);
                 segments.Add(segment);
+                progress?.Report((index + 1, ordered.Length, $"Drafting description {index + 1} of {ordered.Length}."));
             }
         }
         finally
         {
-            await runtime.UnloadAsync(modelName, CancellationToken.None).ConfigureAwait(false);
+            if (modelLoaded)
+            {
+                await runtime.UnloadAsync(modelName, CancellationToken.None).ConfigureAwait(false);
+            }
         }
 
         await PersistCompletionAsync(projectDirectory, projectId, segments, cancellationToken).ConfigureAwait(false);
@@ -137,7 +171,8 @@ public sealed class AdDraftCoordinator(
             prompt.Sha256,
             null,
             null,
-            false);
+            false,
+            BuildInputFingerprint(package));
     }
 
     private static void ValidateEvidence(AdDraftPackage package, AdDraftResponse draft)
@@ -153,12 +188,63 @@ public sealed class AdDraftCoordinator(
         }
     }
 
+    private static async Task<AdSegment?> TryLoadExistingAsync(
+        string projectDirectory,
+        AdDraftPackage package,
+        PromptResource prompt,
+        CancellationToken cancellationToken)
+    {
+        var path = DraftPath(projectDirectory, package.Opportunity.IntervalId);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            await using var stream = File.OpenRead(path);
+            var segment = await JsonSerializer.DeserializeAsync<AdSegment>(
+                stream,
+                JsonOptions,
+                cancellationToken).ConfigureAwait(false);
+            if (segment is null
+                || segment.SegmentId != $"ad-{package.Opportunity.IntervalId}"
+                || segment.SceneId != package.Opportunity.SceneId
+                || segment.Window != package.Opportunity.Window
+                || segment.PromptId != prompt.Id
+                || segment.PromptVersion != prompt.Version.ToString()
+                || segment.PromptSha256 != prompt.Sha256
+                || segment.InputFingerprint != BuildInputFingerprint(package)
+                || NarrationTimingPolicy.EstimateSpeechDuration(segment.Text)
+                   > package.Opportunity.Window.Duration - TimeSpan.FromMilliseconds(250))
+            {
+                return null;
+            }
+
+            ValidateEvidence(package, new(segment.Text, segment.EvidenceIds, null, "Persisted verified draft"));
+            _ = ValidateAndCreate(
+                package,
+                new(segment.Text, segment.EvidenceIds, null, "Persisted verified draft"),
+                prompt);
+            return segment with
+            {
+                NarrationAssetRelativePath = null,
+                MeasuredNarrationDuration = null,
+                UserApproved = false,
+            };
+        }
+        catch (Exception error) when (error is JsonException or InvalidDataException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
     private static Task PersistAsync(
         string projectDirectory,
         AdSegment segment,
         CancellationToken cancellationToken) =>
         WriteJsonAsync(
-            Path.Combine(Path.GetFullPath(projectDirectory), "ad", "drafts", segment.SegmentId + ".json"),
+            DraftPath(projectDirectory, segment.SegmentId["ad-".Length..]),
             segment,
             cancellationToken);
 
@@ -169,8 +255,23 @@ public sealed class AdDraftCoordinator(
         CancellationToken cancellationToken) =>
         WriteJsonAsync(
             Path.Combine(Path.GetFullPath(projectDirectory), "manifests", "ad-draft-complete.json"),
-            new { ProjectId = projectId, Segments = segments },
+            new AdDraftCompletionManifest(projectId, segments),
             cancellationToken);
+
+    private static string DraftPath(string projectDirectory, string intervalId) =>
+        Path.Combine(Path.GetFullPath(projectDirectory), "ad", "drafts", $"ad-{intervalId}.json");
+
+    private static string BuildInputFingerprint(AdDraftPackage package)
+    {
+        var canonical = JsonSerializer.Serialize(new
+        {
+            package.Opportunity,
+            Facts = package.VerifiedFacts.OrderBy(fact => fact.FactId, StringComparer.Ordinal),
+            package.NearbyDialogue,
+            Entities = package.Entities.OrderBy(entity => entity.EntityId, StringComparer.Ordinal),
+        });
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+    }
 
     private static async Task WriteJsonAsync<T>(string path, T value, CancellationToken cancellationToken)
     {
