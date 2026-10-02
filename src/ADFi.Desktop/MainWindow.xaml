@@ -266,26 +266,70 @@
                             <StackPanel Margin="8">
                                 <TextBlock TextWrapping="Wrap"
                                            Text="Creator review is enabled only for a selected local project with a current verified entitlement. Changes are proposed first and committed through validated project mutations." />
+                                <Button x:Name="BuildDraftPreviewButton"
+                                        Content="_Build or resume full draft preview"
+                                        TabIndex="24"
+                                        IsEnabled="False"
+                                        HorizontalAlignment="Left"
+                                        Click="BuildDraftPreviewButton_OnClick"
+                                        AutomationProperties.Name="Build or resume full audio-described draft preview"
+                                        AutomationProperties.HelpText="Validates the committed draft and creates a review MP4 without changing the immutable source video." />
                                 <Label Target="{Binding ElementName=DescriptionsList}" Content="Audio _descriptions" />
                                 <ListBox x:Name="DescriptionsList"
                                          MinHeight="90"
-                                         TabIndex="24"
-                                         AutomationProperties.Name="Audio description segments" />
+                                         TabIndex="25"
+                                         DisplayMemberPath="AccessibleLabel"
+                                         SelectionChanged="DescriptionsList_OnSelectionChanged"
+                                         AutomationProperties.Name="Audio description segments"
+                                         AutomationProperties.HelpText="Select a description, then use Play around selected description for an exact short review clip." />
+                                <Border Height="360" Margin="4,8,4,4" Background="Black">
+                                    <MediaElement x:Name="DraftPreviewPlayer"
+                                                  LoadedBehavior="Manual"
+                                                  UnloadedBehavior="Manual"
+                                                  ScrubbingEnabled="True"
+                                                  Stretch="Uniform"
+                                                  Focusable="False"
+                                                  MediaOpened="DraftPreviewPlayer_OnMediaOpened"
+                                                  MediaEnded="DraftPreviewPlayer_OnMediaEnded"
+                                                  MediaFailed="DraftPreviewPlayer_OnMediaFailed"
+                                                  AutomationProperties.Name="Audio-described draft preview video" />
+                                </Border>
+                                <WrapPanel>
+                                    <Button x:Name="PlayDraftPreviewButton"
+                                            Content="_Play preview"
+                                            TabIndex="26"
+                                            IsEnabled="False"
+                                            Click="PlayDraftPreviewButton_OnClick"
+                                            AutomationProperties.Name="Play loaded draft preview" />
+                                    <Button x:Name="PauseDraftPreviewButton"
+                                            Content="Pa_use preview"
+                                            TabIndex="27"
+                                            IsEnabled="False"
+                                            Click="PauseDraftPreviewButton_OnClick"
+                                            AutomationProperties.Name="Pause loaded draft preview" />
+                                    <Button x:Name="PlaySelectionPreviewButton"
+                                            Content="Play _around selected description"
+                                            TabIndex="28"
+                                            IsEnabled="False"
+                                            Click="PlaySelectionPreviewButton_OnClick"
+                                            AutomationProperties.Name="Play preview around selected description" />
+                                </WrapPanel>
+                                <TextBlock x:Name="DraftPreviewStatusText"
+                                           Margin="4"
+                                           Text="No draft preview is loaded."
+                                           TextWrapping="Wrap"
+                                           AutomationProperties.Name="Draft preview playback status" />
                                 <Label Target="{Binding ElementName=ConversationTextBox}" Content="Project _request" />
                                 <TextBox x:Name="ConversationTextBox"
-                                         TabIndex="25"
+                                         TabIndex="29"
                                          AutomationProperties.Name="Natural conversation project request"
                                          AutomationProperties.HelpText="Enter one request. ADFi will plan compound requests as dependency-safe atomic tasks." />
                                 <WrapPanel>
                                     <Button x:Name="SubmitConversationButton"
                                             Content="_Submit request"
-                                            TabIndex="26"
+                                            TabIndex="30"
                                             IsEnabled="False"
                                             AutomationProperties.Name="Submit project request" />
-                                    <Button Content="Play _around selection"
-                                            TabIndex="27"
-                                            IsEnabled="False"
-                                            AutomationProperties.Name="Play preview around selected description" />
                                 </WrapPanel>
                             </StackPanel>
                         </GroupBox>
@@ -297,7 +341,7 @@
                                 <TextBlock Text="On hold or disputed: unavailable until account services are connected" TextWrapping="Wrap" />
                                 <TextBlock Text="Lifetime earnings: unavailable until account services are connected" TextWrapping="Wrap" />
                                 <Button Content="View earnings _details"
-                                        TabIndex="28"
+                                        TabIndex="31"
                                         IsEnabled="False"
                                         HorizontalAlignment="Left"
                                         AutomationProperties.Name="View explainable earnings details" />
@@ -306,12 +350,12 @@
 
                         <Expander Header="Technical activity"
                                   Margin="4"
-                                  TabIndex="29"
+                                  TabIndex="32"
                                   AutomationProperties.Name="Technical activity for advanced users">
                             <TextBox x:Name="TechnicalActivityTextBox"
                                      Margin="8"
                                      MinHeight="110"
-                                     TabIndex="30"
+                                     TabIndex="33"
                                      IsReadOnly="True"
                                      AcceptsReturn="True"
                                      TextWrapping="Wrap"
@@ -342,7 +386,7 @@
                     <WrapPanel Grid.Row="2" Margin="0,0,0,8">
                         <Button x:Name="RefreshDiscoverButton"
                                 Content="_Refresh DISCOVER"
-                                TabIndex="31"
+                                TabIndex="34"
                                 Click="RefreshDiscoverButton_OnClick"
                                 AutomationProperties.Name="Refresh public ADFied works" />
                         <TextBlock x:Name="DiscoverStateText"
@@ -353,7 +397,7 @@
                     </WrapPanel>
                     <ListView Grid.Row="3"
                               x:Name="DiscoverProjects"
-                              TabIndex="32"
+                              TabIndex="35"
                               AutomationProperties.Name="Public ADFied works"
                               AutomationProperties.HelpText="Use arrow keys to select a work. Open it to use the official YouTube player on its ADFi page."
                               SelectionMode="Single"
@@ -376,20 +420,20 @@
                     <WrapPanel Grid.Row="4" Margin="0,8,0,0">
                         <Button x:Name="OpenDiscoverProjectButton"
                                 Content="_Open selected ADFi page"
-                                TabIndex="33"
+                                TabIndex="36"
                                 IsEnabled="False"
                                 Click="OpenDiscoverProjectButton_OnClick"
                                 AutomationProperties.Name="Open selected ADFi project page in the default browser"
                                 AutomationProperties.HelpText="The project page uses the official YouTube player." />
                         <Button x:Name="CopyDiscoverProjectButton"
                                 Content="_Copy selected project page"
-                                TabIndex="34"
+                                TabIndex="37"
                                 IsEnabled="False"
                                 Click="CopyDiscoverProjectButton_OnClick"
                                 AutomationProperties.Name="Copy selected ADFi project page address" />
                         <Button x:Name="OpenDiscoverViewerButton"
                                 Content="Open in accessible _viewer"
-                                TabIndex="35"
+                                TabIndex="38"
                                 IsEnabled="False"
                                 Click="OpenDiscoverViewerButton_OnClick"
                                 AutomationProperties.Name="Open selected ADFi publication in the Accessible Interactive Video Viewer"

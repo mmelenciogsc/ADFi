@@ -6,6 +6,10 @@ Controls expose concise accessible names, roles, states and values. Status chang
 
 Manual release validation records Windows version, application build, JAWS/NVDA versions, speech settings, task script, observed announcement, focus order and result. Automated XAML checks supplement but never replace actual screenreader testing.
 
+## Creator draft review
+
+MY ADFi exposes Phase 9 through native, ordered controls: **Build or resume full draft preview**, the **Audio descriptions** list, **Play preview**, **Pause preview**, and **Play around selected description**. Each list item announces its exact source interval and description. Focus review is selected through the list rather than a visual-only timeline or drag gesture. Preview loading, playback, pause, end and failure states are concise live announcements; opening a full draft does not autoplay, while the explicitly requested focus action plays its short clip. The visual `MediaElement` is never the only representation of project state.
+
 ## Moment-specific video questions
 
 The viewer exposes both `Alt+Q` and a normally focusable **Ask about this moment** button. Activation pauses first and announces the exact checkpoint before moving focus to the edit field. **DICTATE** is exactly one Tab after that field. Submission announces only “Checking this moment”; completion announces only “Answer ready.” The answer is ordinary selectable text with live announcements disabled, so ADFi does not speak a duplicate answer independently of JAWS/NVDA. Playback never resumes automatically. **Resume from HH:MM:SS** is immediate, while `Escape` closes Q&A and returns focus to player controls without asking or resuming.

@@ -30,6 +30,9 @@ public partial class MainWindow : Window, IDisposable
     private bool entitlementVerified;
     private CancellationTokenSource? currentOperationCancellation;
     private System.Windows.Media.MediaPlayer? narrationVoicePreviewPlayer;
+    private ProjectSnapshot? openedProjectSnapshot;
+    private string? loadedDraftPreviewPath;
+    private bool playDraftPreviewWhenOpened;
     private bool disposed;
 
     public MainWindow()
@@ -81,6 +84,7 @@ public partial class MainWindow : Window, IDisposable
         lifetimeCancellation.Cancel();
         currentOperationCancellation?.Cancel();
         narrationVoicePreviewPlayer?.Close();
+        DraftPreviewPlayer.Close();
         lifetimeCancellation.Dispose();
         httpClient.Dispose();
         GC.SuppressFinalize(this);
@@ -330,8 +334,14 @@ public partial class MainWindow : Window, IDisposable
         {
             SelectedProjectText.Text = "No local project selected.";
             PipelineProgressBar.Value = 0;
+            ClearOpenedProjectReview();
             UpdateCreatorAccess();
             return;
+        }
+
+        if (openedProjectSnapshot?.ProjectId != project.ProjectId)
+        {
+            ClearOpenedProjectReview();
         }
 
         SelectedProjectText.Text = project.AccessibleLabel;
@@ -351,8 +361,7 @@ public partial class MainWindow : Window, IDisposable
         {
             var snapshot = await new FileProjectVersionStore(configuration.ProjectRoot)
                 .LoadCurrentAsync(project.ProjectId, lifetimeCancellation.Token);
-            DescriptionsList.ItemsSource = snapshot.AdSegments.Select(segment =>
-                $"{FormatTime(segment.Window.Start)} to {FormatTime(segment.Window.End)}. {segment.Text}").ToArray();
+            PresentProjectSnapshot(snapshot);
             Announce(snapshot.AdSegments.Count == 0
                 ? $"{project.SourceFileName} opened at {project.LatestPhase}. No draft descriptions exist yet."
                 : $"{project.SourceFileName} opened with {snapshot.AdSegments.Count} audio description segments.");
@@ -705,8 +714,9 @@ public partial class MainWindow : Window, IDisposable
                 currentOperationCancellation.Token);
             await PersistInitialDraftAsync(project, result, currentOperationCancellation.Token);
             await LoadLocalProjectsAsync(currentOperationCancellation.Token, project.ProjectId);
-            DescriptionsList.ItemsSource = result.Narration.Segments.Select(item =>
-                $"{FormatTime(item.Segment.Window.Start)} to {FormatTime(item.Segment.Window.End)}. {item.Segment.Text}").ToArray();
+            var snapshot = await new FileProjectVersionStore(configuration.ProjectRoot)
+                .LoadCurrentAsync(project.ProjectId, currentOperationCancellation.Token);
+            PresentProjectSnapshot(snapshot);
             PipelineProgressBar.Value = 9;
             var reviewCount = result.Narration.Segments.Count(item => item.RequiresUserReview);
             Announce(
@@ -725,6 +735,159 @@ public partial class MainWindow : Window, IDisposable
             currentOperationCancellation = null;
             SetLocalOperationState(running: false);
         }
+    }
+
+    private async void BuildDraftPreviewButton_OnClick(object sender, RoutedEventArgs e) =>
+        await BuildAndLoadDraftPreviewAsync(focusWindow: null, autoPlay: false);
+
+    private async void PlaySelectionPreviewButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (LocalProjectsList.SelectedItem is not LocalProjectSummary project
+            || DescriptionsList.SelectedItem is not ReviewDescriptionItem selection)
+        {
+            Announce("Select an audio description first.");
+            return;
+        }
+
+        var snapshot = openedProjectSnapshot;
+        if (snapshot is null || snapshot.ProjectId != project.ProjectId)
+        {
+            snapshot = await new FileProjectVersionStore(configuration.ProjectRoot)
+                .LoadCurrentAsync(project.ProjectId, lifetimeCancellation.Token);
+            PresentProjectSnapshot(snapshot);
+        }
+
+        var start = selection.Segment.Window.Start - TimeSpan.FromSeconds(5);
+        var end = selection.Segment.Window.End + TimeSpan.FromSeconds(5);
+        var focus = new MediaInterval(
+            start < TimeSpan.Zero ? TimeSpan.Zero : start,
+            end > snapshot.MediaDuration ? snapshot.MediaDuration : end);
+        await BuildAndLoadDraftPreviewAsync(focus, autoPlay: true);
+    }
+
+    private async Task BuildAndLoadDraftPreviewAsync(MediaInterval? focusWindow, bool autoPlay)
+    {
+        if (LocalProjectsList.SelectedItem is not LocalProjectSummary project
+            || !entitlementVerified
+            || entitlement?.Plan != SubscriptionPlan.Creator)
+        {
+            Announce("Select a narrated local project with a current Creator subscription first.");
+            return;
+        }
+
+        if (currentOperationCancellation is not null)
+        {
+            Announce("Wait for the current local operation to finish or cancel it first.");
+            return;
+        }
+
+        DraftPreviewPlayer.Stop();
+        DraftPreviewPlayer.Close();
+        loadedDraftPreviewPath = null;
+        currentOperationCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
+        SetLocalOperationState(running: true);
+        PipelineProgressBar.IsIndeterminate = true;
+        Announce(focusWindow is null
+            ? "Validating and building the full audio-described draft preview."
+            : "Validating and building a short preview around the selected description.");
+        try
+        {
+            var workflow = new CreatorPreviewWorkflow(new PreviewAssemblyService(
+                new FinalRenderService("ffmpeg", new FfprobeMediaProbe()),
+                "ffmpeg",
+                new FilePipelineCheckpointStore(configuration.ProjectRoot),
+                TimeProvider.System));
+            var progress = new Progress<CreatorPreviewProgress>(item =>
+            {
+                Announce(item.Announcement);
+                LogTechnical($"Project {project.ProjectId:D}: {item.Announcement}");
+            });
+            var result = await workflow.RunAsync(
+                project.ProjectId,
+                project.ProjectDirectory,
+                focusWindow,
+                progress,
+                currentOperationCancellation.Token);
+            await LoadLocalProjectsAsync(currentOperationCancellation.Token, project.ProjectId);
+            PresentProjectSnapshot(await new FileProjectVersionStore(configuration.ProjectRoot)
+                .LoadCurrentAsync(project.ProjectId, currentOperationCancellation.Token));
+            LoadDraftPreview(
+                focusWindow is null ? result.FullDraftPath : result.FocusPreviewPath!,
+                autoPlay,
+                focusWindow is null ? "full draft" : "selected focus preview");
+            PipelineProgressBar.Value = 10;
+            Announce(result.ReusedFullDraft
+                ? focusWindow is null
+                    ? "Verified full draft preview restored. Use Play preview to begin."
+                    : "Short focus preview ready and playing. The verified full draft was reused."
+                : "Full audio-described draft preview built and verified. Use Play preview to begin.");
+        }
+        catch (Exception exception)
+        {
+            ReportError("Draft preview", exception);
+        }
+        finally
+        {
+            PipelineProgressBar.IsIndeterminate = false;
+            currentOperationCancellation.Dispose();
+            currentOperationCancellation = null;
+            SetLocalOperationState(running: false);
+        }
+    }
+
+    private void DescriptionsList_OnSelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateCreatorAccess();
+
+    private void PlayDraftPreviewButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (loadedDraftPreviewPath is null)
+        {
+            Announce("Build or load a draft preview first.");
+            return;
+        }
+
+        DraftPreviewPlayer.Play();
+        DraftPreviewStatusText.Text = "Draft preview playing.";
+        Announce("Draft preview playing.");
+    }
+
+    private void PauseDraftPreviewButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        DraftPreviewPlayer.Pause();
+        DraftPreviewStatusText.Text = "Draft preview paused.";
+        Announce("Draft preview paused.");
+    }
+
+    private void DraftPreviewPlayer_OnMediaOpened(object sender, RoutedEventArgs e)
+    {
+        DraftPreviewPlayer.Volume = 1;
+        if (playDraftPreviewWhenOpened)
+        {
+            DraftPreviewPlayer.Play();
+            DraftPreviewStatusText.Text = "Selected focus preview playing.";
+        }
+        else
+        {
+            DraftPreviewPlayer.Pause();
+            DraftPreviewStatusText.Text = "Draft preview loaded and paused.";
+        }
+
+        UpdateCreatorAccess();
+    }
+
+    private void DraftPreviewPlayer_OnMediaEnded(object sender, RoutedEventArgs e)
+    {
+        DraftPreviewStatusText.Text = "Draft preview ended.";
+        Announce("Draft preview ended.");
+    }
+
+    private void DraftPreviewPlayer_OnMediaFailed(object sender, ExceptionRoutedEventArgs e)
+    {
+        loadedDraftPreviewPath = null;
+        DraftPreviewStatusText.Text = "Draft preview playback failed.";
+        Announce("Draft preview playback failed. Rebuild the preview or check the media components.");
+        LogTechnical($"Draft preview playback failed: {e.ErrorException?.GetType().Name ?? "unknown error"}.");
+        UpdateCreatorAccess();
     }
 
     private async void RefreshDiscoverButton_OnClick(object sender, RoutedEventArgs e)
@@ -1090,6 +1253,18 @@ public partial class MainWindow : Window, IDisposable
                                             && draftProject.LatestPhase >= AdficationPhase.VlmSceneAnalytics
                                             && (draftProject.LatestPhase < AdficationPhase.PiperNarrationAndTimingValidation
                                                 || draftProject.LatestStatus != CheckpointStatus.Complete);
+        var canPreview = canCreate
+                         && selected
+                         && LocalProjectsList.SelectedItem is LocalProjectSummary previewProject
+                         && (previewProject.LatestPhase > AdficationPhase.PiperNarrationAndTimingValidation
+                             || (previewProject.LatestPhase == AdficationPhase.PiperNarrationAndTimingValidation
+                                 && previewProject.LatestStatus == CheckpointStatus.Complete));
+        BuildDraftPreviewButton.IsEnabled = canPreview && !operationRunning;
+        PlayDraftPreviewButton.IsEnabled = canPreview && !operationRunning && loadedDraftPreviewPath is not null;
+        PauseDraftPreviewButton.IsEnabled = canPreview && !operationRunning && loadedDraftPreviewPath is not null;
+        PlaySelectionPreviewButton.IsEnabled = canPreview
+                                               && !operationRunning
+                                               && DescriptionsList.SelectedItem is ReviewDescriptionItem;
         ReviewGroup.IsEnabled = selected;
         ConversationTextBox.IsEnabled = canReviewConversationally;
         SubmitConversationButton.IsEnabled = false;
@@ -1220,6 +1395,47 @@ public partial class MainWindow : Window, IDisposable
             cancellationToken);
     }
 
+    private void PresentProjectSnapshot(ProjectSnapshot snapshot)
+    {
+        openedProjectSnapshot = snapshot;
+        DescriptionsList.ItemsSource = snapshot.AdSegments
+            .Select(segment => new ReviewDescriptionItem(
+                segment,
+                $"{FormatTime(segment.Window.Start)} to {FormatTime(segment.Window.End)}. {segment.Text}"))
+            .ToArray();
+        UpdateCreatorAccess();
+    }
+
+    private void LoadDraftPreview(string path, bool autoPlay, string label)
+    {
+        var fullPath = Path.GetFullPath(path);
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException("The generated draft preview is missing.", fullPath);
+        }
+
+        DraftPreviewPlayer.Stop();
+        DraftPreviewPlayer.Close();
+        loadedDraftPreviewPath = fullPath;
+        playDraftPreviewWhenOpened = autoPlay;
+        DraftPreviewPlayer.Volume = 0;
+        DraftPreviewPlayer.Source = new Uri(fullPath, UriKind.Absolute);
+        DraftPreviewPlayer.Play();
+        DraftPreviewStatusText.Text = $"Loading {label}.";
+        UpdateCreatorAccess();
+    }
+
+    private void ClearOpenedProjectReview()
+    {
+        openedProjectSnapshot = null;
+        DescriptionsList.ItemsSource = null;
+        loadedDraftPreviewPath = null;
+        playDraftPreviewWhenOpened = false;
+        DraftPreviewPlayer.Stop();
+        DraftPreviewPlayer.Close();
+        DraftPreviewStatusText.Text = "No draft preview is loaded.";
+    }
+
     private static bool SegmentsMatch(
         IReadOnlyList<AdSegment> left,
         AdSegment[] right) =>
@@ -1237,4 +1453,6 @@ public partial class MainWindow : Window, IDisposable
             && pair.First.MeasuredNarrationDuration == pair.Second.MeasuredNarrationDuration
             && pair.First.UserApproved == pair.Second.UserApproved
             && pair.First.InputFingerprint == pair.Second.InputFingerprint);
+
+    private sealed record ReviewDescriptionItem(AdSegment Segment, string AccessibleLabel);
 }

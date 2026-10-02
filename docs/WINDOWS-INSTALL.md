@@ -39,6 +39,8 @@ Next, activate **Continue with characters, text, and scene understanding**. The 
 
 Choose one of the five screenreader-named entries in **Narration voice** and use **Preview selected voice** if desired. Then activate **Create description draft and narration**. ADFi selects time-valid quiet windows, creates and saves each evidence-grounded draft, synthesizes one Piper segment at a time, measures its real duration and performs at most three bounded Qwen shortening attempts when necessary. Valid drafts and WAV files resume without regeneration; a mismatched prompt, voice, hash or corrupt audio invalidates the affected checkpoint. Any remaining overrun is announced and held for review rather than time-compressed.
 
+Activate **Build or resume full draft preview** after narration completes. ADFi validates the source, evidence, timing and audio hashes before creating or restoring the private review MP4. Use the native **Play preview** and **Pause preview** controls. To inspect one cue, select it in **Audio descriptions** and activate **Play around selected description**; ADFi reuses the full draft and creates an exact short clip bounded to the source duration.
+
 ## Accessible first run
 
 Start JAWS 2025 or NVDA before ADFi. Keyboard focus begins in the native two-destination navigation. DISCOVER remains usable without login. Creator processing remains disabled until the user signs in, has a server-authoritative Creator entitlement, checks the rights/authorization attestation and selects an existing local video. The first Creator activation runs the accessible hardware profile and miniature benchmark before recommending a model tier.

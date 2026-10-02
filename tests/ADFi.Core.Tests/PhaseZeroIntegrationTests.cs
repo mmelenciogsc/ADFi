@@ -138,21 +138,27 @@ public sealed class PhaseZeroIntegrationTests
             Assert.Equal(before, await File.ReadAllBytesAsync(sourcePath, cancellationToken));
 
             var checkpointStore = new FilePipelineCheckpointStore(projectPath);
-            var preview = await new PreviewAssemblyService(
+            var previewService = new PreviewAssemblyService(
                 renderer,
                 "ffmpeg",
                 checkpointStore,
-                TimeProvider.System).AssembleAsync(
-                new(
-                    result.Attestation.ProjectId,
-                    projectPath,
-                    sourcePath,
-                    result.Source.Probe,
-                    [new("ad-1", narrationPath, new(TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(800)), TimeSpan.FromMilliseconds(250))],
-                    new(TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(900))),
+                TimeProvider.System);
+            var previewRequest = new PreviewAssemblyRequest(
+                result.Attestation.ProjectId,
+                projectPath,
+                sourcePath,
+                result.Source.Probe,
+                [new("ad-1", narrationPath, new(TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(800)), TimeSpan.FromMilliseconds(250))],
+                new(TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(900)));
+            var preview = await previewService.AssembleAsync(
+                previewRequest,
                 cancellationToken);
+            var restoredPreview = await previewService.AssembleAsync(previewRequest, cancellationToken);
 
             Assert.Equal("REVIEW_IN_PROGRESS", preview.ReviewState);
+            Assert.False(preview.ReusedFullDraft);
+            Assert.True(restoredPreview.ReusedFullDraft);
+            Assert.Equal(preview.Manifest.UpdatedAtUtc, restoredPreview.Manifest.UpdatedAtUtc);
             Assert.True(File.Exists(preview.FullDraftPath));
             Assert.True(File.Exists(preview.FocusPreviewPath));
             Assert.Equal(AdficationPhase.InitialPreviewAssembly, preview.Checkpoint.Phase);
