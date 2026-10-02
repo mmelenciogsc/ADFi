@@ -60,6 +60,10 @@ public sealed class RepositoryArchitectureTests
             "FinalValidationIssuesList",
             "OverrideSelectedWarningButton",
             "FinalValidationStatusText",
+            "IncludeNarrationAssetsCheckBox",
+            "RenderFinalVideoButton",
+            "OpenFinalOutputButton",
+            "FinalRenderStatusText",
             "RefreshDiscoverButton",
             "DiscoverProjects",
             "OpenDiscoverProjectButton",
@@ -87,7 +91,7 @@ public sealed class RepositoryArchitectureTests
             .Where(value => value is not null)
             .Select(value => int.Parse(value!, System.Globalization.CultureInfo.InvariantCulture))
             .ToArray();
-        Assert.Equal(Enumerable.Range(1, 43), tabIndices.Order());
+        Assert.Equal(Enumerable.Range(1, 46), tabIndices.Order());
     }
 
     [Fact]

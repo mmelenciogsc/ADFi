@@ -395,6 +395,40 @@
                                            TextWrapping="Wrap"
                                            AutomationProperties.Name="Final validation status"
                                            AutomationProperties.LiveSetting="Polite" />
+                                <TextBlock Text="Final output"
+                                           Margin="4,12,4,2"
+                                           FontSize="17"
+                                           FontWeight="SemiBold"
+                                           AutomationProperties.HeadingLevel="Level2" />
+                                <TextBlock Text="Creates a content-addressed ADFied MP4, separate audio-description script, and structured project export. Compatible source video is stream-copied without quality loss."
+                                           TextWrapping="Wrap" />
+                                <CheckBox x:Name="IncludeNarrationAssetsCheckBox"
+                                          Content="Include separate _narration audio files in the final bundle"
+                                          Margin="4"
+                                          TabIndex="36"
+                                          IsChecked="True"
+                                          AutomationProperties.Name="Include separate narration audio files in final bundle" />
+                                <WrapPanel>
+                                    <Button x:Name="RenderFinalVideoButton"
+                                            Content="_Render or resume final ADFied MP4"
+                                            TabIndex="37"
+                                            IsEnabled="False"
+                                            Click="RenderFinalVideoButton_OnClick"
+                                            AutomationProperties.Name="Render or resume final ADFied MP4"
+                                            AutomationProperties.HelpText="Requires a successful final validation for the exact current committed version. The original source is never overwritten." />
+                                    <Button x:Name="OpenFinalOutputButton"
+                                            Content="_Open final output folder"
+                                            TabIndex="38"
+                                            IsEnabled="False"
+                                            Click="OpenFinalOutputButton_OnClick"
+                                            AutomationProperties.Name="Open final output folder" />
+                                </WrapPanel>
+                                <TextBlock x:Name="FinalRenderStatusText"
+                                           Margin="4"
+                                           Text="No final output exists for this project version."
+                                           TextWrapping="Wrap"
+                                           AutomationProperties.Name="Final rendering status"
+                                           AutomationProperties.LiveSetting="Polite" />
                             </StackPanel>
                         </GroupBox>
 
@@ -405,7 +439,7 @@
                                 <TextBlock Text="On hold or disputed: unavailable until account services are connected" TextWrapping="Wrap" />
                                 <TextBlock Text="Lifetime earnings: unavailable until account services are connected" TextWrapping="Wrap" />
                                 <Button Content="View earnings _details"
-                                        TabIndex="36"
+                                        TabIndex="39"
                                         IsEnabled="False"
                                         HorizontalAlignment="Left"
                                         AutomationProperties.Name="View explainable earnings details" />
@@ -414,12 +448,12 @@
 
                         <Expander Header="Technical activity"
                                   Margin="4"
-                                  TabIndex="37"
+                                  TabIndex="40"
                                   AutomationProperties.Name="Technical activity for advanced users">
                             <TextBox x:Name="TechnicalActivityTextBox"
                                      Margin="8"
                                      MinHeight="110"
-                                     TabIndex="38"
+                                     TabIndex="41"
                                      IsReadOnly="True"
                                      AcceptsReturn="True"
                                      TextWrapping="Wrap"
@@ -450,7 +484,7 @@
                     <WrapPanel Grid.Row="2" Margin="0,0,0,8">
                         <Button x:Name="RefreshDiscoverButton"
                                 Content="_Refresh DISCOVER"
-                                TabIndex="39"
+                                TabIndex="42"
                                 Click="RefreshDiscoverButton_OnClick"
                                 AutomationProperties.Name="Refresh public ADFied works" />
                         <TextBlock x:Name="DiscoverStateText"
@@ -461,7 +495,7 @@
                     </WrapPanel>
                     <ListView Grid.Row="3"
                               x:Name="DiscoverProjects"
-                              TabIndex="40"
+                              TabIndex="43"
                               AutomationProperties.Name="Public ADFied works"
                               AutomationProperties.HelpText="Use arrow keys to select a work. Open it to use the official YouTube player on its ADFi page."
                               SelectionMode="Single"
@@ -484,20 +518,20 @@
                     <WrapPanel Grid.Row="4" Margin="0,8,0,0">
                         <Button x:Name="OpenDiscoverProjectButton"
                                 Content="_Open selected ADFi page"
-                                TabIndex="41"
+                                TabIndex="44"
                                 IsEnabled="False"
                                 Click="OpenDiscoverProjectButton_OnClick"
                                 AutomationProperties.Name="Open selected ADFi project page in the default browser"
                                 AutomationProperties.HelpText="The project page uses the official YouTube player." />
                         <Button x:Name="CopyDiscoverProjectButton"
                                 Content="_Copy selected project page"
-                                TabIndex="42"
+                                TabIndex="45"
                                 IsEnabled="False"
                                 Click="CopyDiscoverProjectButton_OnClick"
                                 AutomationProperties.Name="Copy selected ADFi project page address" />
                         <Button x:Name="OpenDiscoverViewerButton"
                                 Content="Open in accessible _viewer"
-                                TabIndex="43"
+                                TabIndex="46"
                                 IsEnabled="False"
                                 Click="OpenDiscoverViewerButton_OnClick"
                                 AutomationProperties.Name="Open selected ADFi publication in the Accessible Interactive Video Viewer"

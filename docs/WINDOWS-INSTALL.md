@@ -45,6 +45,8 @@ For Phase 10, open the narrated project, select a description when the request r
 
 When review is complete, activate **Run final validation**. JAWS/NVDA receives one completion or blocked summary. If blocked, use the native **Final validation issues** list: errors marked “Must be fixed” cannot be bypassed; warnings marked “Override available” can be selected and individually approved with **Override selected warning**, which reruns the full gate. Any later project mutation invalidates that result. Continue to final rendering only after the status says the exact committed project version is ready.
 
+Choose whether to include the individual narration WAV files, then activate **Render or resume final ADFied MP4**. ADFi announces validation, rendering, script/export writing and completion as separate stages. A retry verifies and restores an intact completed bundle instead of rendering it again. Activate **Open final output folder** to reach the MP4, UTF-8 AD script, structured project JSON, integrity manifest and any selected narration assets. The bundle is under the private project directory; the authorized source file is never overwritten.
+
 ## Accessible first run
 
 Start JAWS 2025 or NVDA before ADFi. Keyboard focus begins in the native two-destination navigation. DISCOVER remains usable without login. Creator processing remains disabled until the user signs in, has a server-authoritative Creator entitlement, checks the rights/authorization attestation and selects an existing local video. The first Creator activation runs the accessible hardware profile and miniature benchmark before recommending a model tier.

@@ -23,7 +23,14 @@ public sealed record FinalRenderResult(
     bool VideoStreamCopied,
     TimeSpan Duration);
 
-public sealed class FinalRenderService(string ffmpegPath, IMediaProbe mediaProbe)
+public interface IFinalMediaRenderer
+{
+    Task<FinalRenderResult> RenderAsync(
+        FinalRenderRequest request,
+        CancellationToken cancellationToken);
+}
+
+public sealed class FinalRenderService(string ffmpegPath, IMediaProbe mediaProbe) : IFinalMediaRenderer
 {
     public async Task<FinalRenderResult> RenderAsync(
         FinalRenderRequest request,
@@ -77,7 +84,7 @@ public sealed class FinalRenderService(string ffmpegPath, IMediaProbe mediaProbe
                 arguments.AddRange(
                 [
                     "-c:v", "libx264", "-preset", "slow", "-crf", "18",
-                    "-vf", "scale=w='min(1920,iw)':h=-2:flags=lanczos",
+                    "-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos",
                 ]);
             }
 

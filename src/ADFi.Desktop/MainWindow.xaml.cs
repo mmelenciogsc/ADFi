@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation.Peers;
@@ -39,7 +40,10 @@ public partial class MainWindow : Window, IDisposable
     private System.Windows.Media.MediaPlayer? narrationVoicePreviewPlayer;
     private ProjectSnapshot? openedProjectSnapshot;
     private int? finalValidationSnapshotVersion;
+    private bool finalValidationReady;
+    private string? finalValidationBindingSha256;
     private readonly HashSet<string> finalValidationOverrideIds = new(StringComparer.Ordinal);
+    private string? finalOutputPath;
     private string? loadedDraftPreviewPath;
     private bool playDraftPreviewWhenOpened;
     private bool disposed;
@@ -373,6 +377,7 @@ public partial class MainWindow : Window, IDisposable
             PresentProjectSnapshot(snapshot);
             await LoadConversationHistoryAsync(project.ProjectDirectory, lifetimeCancellation.Token);
             await LoadFinalValidationStateAsync(project.ProjectDirectory, snapshot, lifetimeCancellation.Token);
+            await LoadFinalRenderStateAsync(project.ProjectDirectory, snapshot, lifetimeCancellation.Token);
             Announce(snapshot.AdSegments.Count == 0
                 ? $"{project.SourceFileName} opened at {project.LatestPhase}. No draft descriptions exist yet."
                 : $"{project.SourceFileName} opened with {snapshot.AdSegments.Count} audio description segments.");
@@ -941,6 +946,99 @@ public partial class MainWindow : Window, IDisposable
         finalValidationOverrideIds.Add(selected.Issue.IssueId);
         Announce($"Override recorded for {selected.Issue.Code}. Running every final check again.");
         await RunFinalValidationAsync();
+    }
+
+    private async void RenderFinalVideoButton_OnClick(object sender, RoutedEventArgs e) =>
+        await RenderFinalVideoAsync();
+
+    private void OpenFinalOutputButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (finalOutputPath is null || !File.Exists(finalOutputPath))
+        {
+            Announce("The final output is unavailable. Render or verify the final bundle again.");
+            ClearFinalRenderState();
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = Path.GetDirectoryName(finalOutputPath)!,
+            UseShellExecute = true,
+        });
+        Announce("Final output folder opened.");
+    }
+
+    private async Task RenderFinalVideoAsync()
+    {
+        if (LocalProjectsList.SelectedItem is not LocalProjectSummary project
+            || !entitlementVerified
+            || entitlement?.Plan != SubscriptionPlan.Creator
+            || openedProjectSnapshot is not { AdSegments.Count: > 0 } snapshot
+            || !finalValidationReady
+            || finalValidationSnapshotVersion != snapshot.Version)
+        {
+            Announce("Run final validation successfully for the exact opened project version first.");
+            return;
+        }
+
+        if (currentOperationCancellation is not null)
+        {
+            Announce("Wait for the current local operation to finish or cancel it first.");
+            return;
+        }
+
+        currentOperationCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
+        SetLocalOperationState(running: true);
+        PipelineProgressBar.IsIndeterminate = false;
+        FinalRenderStatusText.Text = "Rendering final ADFied MP4.";
+        Announce("Rendering final ADFied MP4.");
+        try
+        {
+            var mediaProbe = new FfprobeMediaProbe();
+            var workflow = new CreatorFinalizationWorkflow(
+                new FileProjectVersionStore(configuration.ProjectRoot),
+                new FilePipelineCheckpointStore(configuration.ProjectRoot),
+                mediaProbe,
+                new FinalRenderService("ffmpeg", mediaProbe),
+                TimeProvider.System);
+            var progress = new Progress<CreatorFinalizationProgress>(item =>
+            {
+                PipelineProgressBar.Value = 12 + Math.Clamp(
+                    item.TotalSteps == 0 ? 0 : (double)item.CompletedSteps / item.TotalSteps,
+                    0,
+                    1);
+                FinalRenderStatusText.Text = item.Announcement;
+                Announce(item.Announcement);
+                LogTechnical($"Project {project.ProjectId:D}: {item.Announcement}");
+            });
+            var result = await workflow.RunAsync(
+                new(
+                    project.ProjectId,
+                    project.ProjectDirectory,
+                    IncludeNarrationAssetsCheckBox.IsChecked == true),
+                progress,
+                currentOperationCancellation.Token);
+            finalOutputPath = result.FinalVideoPath;
+            await LoadLocalProjectsAsync(currentOperationCancellation.Token, project.ProjectId);
+            PipelineProgressBar.Value = 13;
+            PresentFinalRender(result.Manifest, result.FinalVideoPath);
+            Announce(result.ReusedVerifiedBundle
+                ? "Verified final ADFied MP4 restored. Open final output folder is available."
+                : result.Manifest.VideoStreamCopied
+                    ? "Final ADFied MP4 complete with zero additional video-quality loss. Open final output folder is available."
+                    : "Final ADFied MP4 complete using the transparent video profile. Open final output folder is available.");
+        }
+        catch (Exception exception)
+        {
+            FinalRenderStatusText.Text = "Final rendering did not complete. Verified intermediate work was preserved.";
+            ReportError("Final rendering", exception);
+        }
+        finally
+        {
+            currentOperationCancellation.Dispose();
+            currentOperationCancellation = null;
+            SetLocalOperationState(running: false);
+        }
     }
 
     private async Task RunFinalValidationAsync()
@@ -1530,6 +1628,13 @@ public partial class MainWindow : Window, IDisposable
                                                   && FinalValidationIssuesList.SelectedItem is FinalValidationIssueItem item
                                                   && item.Issue.CanOverride
                                                   && !item.Issue.Overridden;
+        IncludeNarrationAssetsCheckBox.IsEnabled = canFinalize;
+        RenderFinalVideoButton.IsEnabled = canFinalize
+                                           && finalValidationReady
+                                           && finalValidationSnapshotVersion == openedProjectSnapshot?.Version;
+        OpenFinalOutputButton.IsEnabled = !operationRunning
+                                          && finalOutputPath is not null
+                                          && File.Exists(finalOutputPath);
     }
 
     private void SetLocalOperationState(bool running)
@@ -1676,6 +1781,9 @@ public partial class MainWindow : Window, IDisposable
     private void PresentFinalValidation(FinalProjectValidationManifest manifest)
     {
         finalValidationSnapshotVersion = manifest.ProjectVersion;
+        finalValidationReady = manifest.State == "READY_FOR_FINAL_RENDER"
+                               && manifest.Issues.All(item => item.Overridden);
+        finalValidationBindingSha256 = FinalProjectValidationBinding.ComputeManifestBindingSha256(manifest);
         finalValidationOverrideIds.Clear();
         finalValidationOverrideIds.UnionWith(manifest.AppliedOverrideIssueIds);
         FinalValidationIssuesList.ItemsSource = manifest.Issues
@@ -1692,13 +1800,35 @@ public partial class MainWindow : Window, IDisposable
         UpdateCreatorAccess();
     }
 
+    private void PresentFinalRender(FinalRenderCompletionManifest manifest, string outputPath)
+    {
+        finalOutputPath = outputPath;
+        FinalRenderStatusText.Text =
+            $"Final output complete for project version {manifest.ProjectVersion}. " +
+            (manifest.VideoStreamCopied
+                ? "The source video stream was copied without re-encoding. "
+                : "The source video required transparent re-encoding. ") +
+            $"Narration assets {(manifest.NarrationAssetsIncluded ? "are included" : "are not included")}.";
+        UpdateCreatorAccess();
+    }
+
     private async Task LoadFinalValidationStateAsync(
         string projectDirectory,
         ProjectSnapshot snapshot,
         CancellationToken cancellationToken)
     {
         var path = Path.Combine(projectDirectory, "manifests", "final-project-validation.json");
-        if (!File.Exists(path))
+        var checkpoint = (await new FilePipelineCheckpointStore(configuration.ProjectRoot)
+                .LoadAsync(snapshot.ProjectId, cancellationToken))
+            .SingleOrDefault(item =>
+                item.Phase == AdficationPhase.FinalProjectValidation);
+        if (!File.Exists(path)
+            || checkpoint is null
+            || checkpoint.ManifestRelativePath != "manifests/final-project-validation.json"
+            || !string.Equals(
+                checkpoint.OutputSha256,
+                await ComputeFileSha256Async(path, cancellationToken),
+                StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -1712,7 +1842,16 @@ public partial class MainWindow : Window, IDisposable
                 cancellationToken);
             if (manifest is not null
                 && manifest.ProjectId == snapshot.ProjectId
-                && manifest.ProjectVersion == snapshot.Version)
+                && manifest.ProjectVersion == snapshot.Version
+                && string.Equals(
+                    manifest.ProjectStateSha256,
+                    FinalProjectValidationBinding.ComputeProjectStateSha256(snapshot),
+                    StringComparison.OrdinalIgnoreCase)
+                && ((manifest.State == "READY_FOR_FINAL_RENDER"
+                     && manifest.Issues.All(item => item.Overridden)
+                     && checkpoint.Status == CheckpointStatus.Complete)
+                    || (manifest.State == "BLOCKED"
+                        && checkpoint.Status == CheckpointStatus.Failed)))
             {
                 PresentFinalValidation(manifest);
             }
@@ -1723,12 +1862,108 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    private async Task LoadFinalRenderStateAsync(
+        string projectDirectory,
+        ProjectSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        var checkpoint = (await new FilePipelineCheckpointStore(configuration.ProjectRoot)
+                .LoadAsync(snapshot.ProjectId, cancellationToken))
+            .SingleOrDefault(item =>
+                item.Phase == AdficationPhase.FinalMp4Rendering
+                && item.Status == CheckpointStatus.Complete);
+        if (checkpoint is null || string.IsNullOrWhiteSpace(checkpoint.ManifestRelativePath))
+        {
+            return;
+        }
+
+        try
+        {
+            var root = Path.GetFullPath(projectDirectory);
+            var path = Path.GetFullPath(Path.Combine(
+                root,
+                checkpoint.ManifestRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+            if (!path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (!string.Equals(
+                    checkpoint.OutputSha256,
+                    await ComputeFileSha256Async(path, cancellationToken),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            await using var stream = File.OpenRead(path);
+            var manifest = await JsonSerializer.DeserializeAsync<FinalRenderCompletionManifest>(
+                stream,
+                ConversationJsonOptions,
+                cancellationToken);
+            if (manifest is not null
+                && manifest.ProjectId == snapshot.ProjectId
+                && manifest.ProjectVersion == snapshot.Version
+                && manifest.State == "FINAL_RENDER_COMPLETE"
+                && string.Equals(
+                    manifest.FinalValidationBindingSha256,
+                    finalValidationBindingSha256,
+                    StringComparison.OrdinalIgnoreCase)
+                && string.Equals(
+                    manifest.ProjectStateSha256,
+                    FinalProjectValidationBinding.ComputeProjectStateSha256(snapshot),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                var output = Path.GetFullPath(Path.Combine(
+                    root,
+                    manifest.FinalVideoRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+                if (output.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    && File.Exists(output)
+                    && string.Equals(
+                        manifest.FinalVideoSha256,
+                        await ComputeFileSha256Async(output, cancellationToken),
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    PresentFinalRender(manifest, output);
+                }
+            }
+        }
+        catch (Exception error) when (error is JsonException or IOException or InvalidDataException)
+        {
+            LogTechnical($"Ignored one invalid final-render manifest: {error.GetType().Name}.");
+        }
+    }
+
     private void ClearFinalValidationState()
     {
         finalValidationSnapshotVersion = null;
+        finalValidationReady = false;
+        finalValidationBindingSha256 = null;
         finalValidationOverrideIds.Clear();
         FinalValidationIssuesList.ItemsSource = null;
         FinalValidationStatusText.Text = "Final validation has not run for this project version.";
+        ClearFinalRenderState();
+    }
+
+    private void ClearFinalRenderState()
+    {
+        finalOutputPath = null;
+        FinalRenderStatusText.Text = "No final output exists for this project version.";
+        OpenFinalOutputButton.IsEnabled = false;
+    }
+
+    private static async Task<string> ComputeFileSha256Async(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
     }
 
     private void SelectDescription(string? segmentId)

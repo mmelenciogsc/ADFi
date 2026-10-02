@@ -44,7 +44,7 @@ public sealed record PreviewAssemblyResult(
 /// clip is re-encoded for frame-accurate seeking, and a changed focus never rerenders the full draft.
 /// </summary>
 public sealed class PreviewAssemblyService(
-    FinalRenderService renderer,
+    IFinalMediaRenderer renderer,
     string ffmpegPath,
     IPipelineCheckpointStore checkpointStore,
     TimeProvider timeProvider)

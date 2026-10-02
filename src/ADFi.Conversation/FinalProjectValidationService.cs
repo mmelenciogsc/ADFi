@@ -56,6 +56,40 @@ public sealed record FinalProjectValidationResult(
 }
 
 /// <summary>
+/// Produces the content binding used by both the Phase 11 gate and Phase 12 renderer.
+/// A committed project version cannot be rendered through a validation result created for
+/// different text, timings, evidence, voice, or narration asset references.
+/// </summary>
+public static class FinalProjectValidationBinding
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true,
+    };
+
+    public static string ComputeProjectStateSha256(ProjectSnapshot snapshot) =>
+        Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(snapshot, JsonOptions)));
+
+    public static string ComputeManifestBindingSha256(FinalProjectValidationManifest manifest)
+    {
+        var binding = new
+        {
+            manifest.ProjectId,
+            manifest.ProjectVersion,
+            manifest.SourceSha256,
+            manifest.ProjectStateSha256,
+            manifest.MediaDuration,
+            manifest.State,
+            manifest.Issues,
+            manifest.NarrationAssets,
+            manifest.AppliedOverrideIssueIds,
+        };
+        return Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(binding, JsonOptions)));
+    }
+}
+
+/// <summary>
 /// Performs the deterministic Phase 11 gate against committed state and persisted evidence.
 /// Warnings require a deliberate per-issue override; evidence, timing, source, and audit-chain
 /// failures are never overrideable.
@@ -131,7 +165,7 @@ public sealed partial class FinalProjectValidationService(
             .ThenBy(item => item.Code, StringComparer.Ordinal)
             .ToArray();
         var ready = resolvedIssues.All(item => item.Overridden);
-        var stateHash = HashJson(snapshot);
+        var stateHash = FinalProjectValidationBinding.ComputeProjectStateSha256(snapshot);
         var manifest = new FinalProjectValidationManifest(
             projectId,
             snapshot.Version,
