@@ -66,6 +66,45 @@ public sealed class ProjectMutationService(
             cancellationToken);
     }
 
+    public Task<ProjectSnapshot> ReplaceNarrationAsync(
+        Guid projectId,
+        int expectedVersion,
+        IReadOnlyList<AdSegment> proposedSegments,
+        string voiceId,
+        ISet<string> availableEvidenceIds,
+        ISet<string> availableNarrationAssets,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        _ = PiperVoiceCatalog.Get(voiceId);
+        ArgumentNullException.ThrowIfNull(proposedSegments);
+        return ApplyAsync(
+            projectId,
+            expectedVersion,
+            ProjectMutationKind.RegenerateNarration,
+            reason,
+            current =>
+            {
+                var ordered = proposedSegments.OrderBy(segment => segment.Window.Start).ToArray();
+                if (ordered.Length != current.AdSegments.Count
+                    || !ordered.Select(segment => segment.SegmentId)
+                        .ToHashSet(StringComparer.Ordinal)
+                        .SetEquals(current.AdSegments.Select(segment => segment.SegmentId)))
+                {
+                    throw new InvalidOperationException(
+                        "VALIDATION_FAILED: a narration revision must preserve the committed segment identity set.");
+                }
+
+                EnsureValid(current.MediaDuration, ordered, availableEvidenceIds, availableNarrationAssets);
+                return current with
+                {
+                    AdSegments = ordered,
+                    NarrationVoiceId = voiceId,
+                };
+            },
+            cancellationToken);
+    }
+
     public async Task<ProjectSnapshot> UndoAsync(
         Guid projectId,
         int expectedVersion,

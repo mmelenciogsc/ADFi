@@ -25,7 +25,8 @@ public sealed class CreatorPreviewWorkflow(
         string projectDirectory,
         MediaInterval? focusWindow,
         IProgress<CreatorPreviewProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ProjectSnapshot? committedSnapshot = null)
     {
         var root = Path.GetFullPath(projectDirectory);
         var source = await LoadAsync<SourceIntakeResult>(
@@ -55,46 +56,77 @@ public sealed class CreatorPreviewWorkflow(
             throw new InvalidDataException("The narration manifest does not match the verified AD draft.");
         }
 
-        progress?.Report(new("Validating description evidence, narration timing, and audio assets."));
-        var timed = new List<TimedNarrationAsset>(narration.Segments.Count);
-        var narrationAssets = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var item in narration.Segments)
+        var segments = committedSnapshot?.AdSegments ?? narration.Segments.Select(item => item.Segment).ToArray();
+        var voiceId = committedSnapshot?.NarrationVoiceId ?? narration.VoiceId;
+        if (committedSnapshot is not null
+            && (committedSnapshot.ProjectId != projectId
+                || !string.Equals(
+                    committedSnapshot.SourceSha256,
+                    source.Source.SourceSha256,
+                    StringComparison.OrdinalIgnoreCase)))
         {
-            if (item.RequiresUserReview || !item.Fit.Fits)
+            throw new InvalidDataException("The committed review state does not match the immutable project source.");
+        }
+
+        progress?.Report(new("Validating description evidence, narration timing, and audio assets."));
+        var timed = new List<TimedNarrationAsset>(segments.Count);
+        var narrationAssets = new HashSet<string>(StringComparer.Ordinal);
+        var originalNarration = narration.Segments.ToDictionary(item => item.Segment.SegmentId, StringComparer.Ordinal);
+        foreach (var segment in segments)
+        {
+            if (originalNarration.TryGetValue(segment.SegmentId, out var item)
+                && SameNarrationState(segment, item.Segment))
             {
-                throw new InvalidOperationException(
-                    $"Description {item.Segment.SegmentId} requires timing review before preview assembly.");
+                if (item.RequiresUserReview || !item.Fit.Fits)
+                {
+                    throw new InvalidOperationException(
+                        $"Description {item.Segment.SegmentId} requires timing review before preview assembly.");
+                }
+
+                if (item.VoiceId != narration.VoiceId
+                    || item.Segment.MeasuredNarrationDuration is not { } measured
+                    || item.Fit.Available <= TimeSpan.Zero
+                    || item.Fit.Available > item.Segment.Window.Duration
+                    || item.SynthesisAttempts != item.Fit.AttemptNumber
+                    || item.RequiresUserReview != item.Fit.RequiresUserReview
+                    || NarrationTimingPolicy.Evaluate(
+                        measured,
+                        item.Segment.Window.Duration,
+                        item.Segment.Window.Duration - item.Fit.Available,
+                        item.Fit.AttemptNumber) != item.Fit)
+                {
+                    throw new InvalidDataException($"Narration timing provenance is invalid for {item.Segment.SegmentId}.");
+                }
             }
 
-            if (item.VoiceId != narration.VoiceId
-                || item.Segment.MeasuredNarrationDuration is not { } measured
-                || item.Fit.Available <= TimeSpan.Zero
-                || item.Fit.Available > item.Segment.Window.Duration
-                || item.SynthesisAttempts != item.Fit.AttemptNumber
-                || item.RequiresUserReview != item.Fit.RequiresUserReview
-                || NarrationTimingPolicy.Evaluate(
-                    measured,
-                    item.Segment.Window.Duration,
-                    item.Segment.Window.Duration - item.Fit.Available,
-                    item.Fit.AttemptNumber) != item.Fit)
-            {
-                throw new InvalidDataException($"Narration timing provenance is invalid for {item.Segment.SegmentId}.");
-            }
-
-            var relative = item.Segment.NarrationAssetRelativePath
+            var relative = segment.NarrationAssetRelativePath
                            ?? throw new InvalidDataException("A description has no narration asset path.");
             var absolute = ResolveProjectArtifact(root, relative);
-            if (!File.Exists(absolute)
-                || !string.Equals(
+            if (!File.Exists(absolute))
+            {
+                throw new InvalidDataException($"Narration asset validation failed for {segment.SegmentId}.");
+            }
+
+            var actualDuration = WaveDurationReader.Measure(absolute);
+            if (segment.MeasuredNarrationDuration is not { } storedDuration
+                || actualDuration != storedDuration
+                || actualDuration > segment.Window.Duration)
+            {
+                throw new InvalidDataException($"Measured narration timing is invalid for {segment.SegmentId}.");
+            }
+
+            if (item is not null
+                && SameNarrationState(segment, item.Segment)
+                && !string.Equals(
                     item.AudioSha256,
                     await HashAsync(absolute, cancellationToken).ConfigureAwait(false),
                     StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidDataException($"Narration asset validation failed for {item.Segment.SegmentId}.");
+                throw new InvalidDataException($"Narration asset validation failed for {segment.SegmentId}.");
             }
 
             narrationAssets.Add(relative);
-            timed.Add(new(item.Segment.SegmentId, absolute, item.Segment.Window, measured));
+            timed.Add(new(segment.SegmentId, absolute, segment.Window, actualDuration));
         }
 
         var evidence = visual.Scenes
@@ -103,7 +135,7 @@ public sealed class CreatorPreviewWorkflow(
             .ToHashSet(StringComparer.Ordinal);
         var issues = ProjectValidator.Validate(
             source.Source.Probe.Duration,
-            narration.Segments.Select(item => item.Segment).ToArray(),
+            segments,
             evidence,
             narrationAssets);
         var blocking = issues.Where(issue => issue.Blocking).ToArray();
@@ -125,8 +157,32 @@ public sealed class CreatorPreviewWorkflow(
                 timed,
                 focusWindow,
                 source.Source.SourceSha256,
-                await HashAsync(narrationPath, cancellationToken).ConfigureAwait(false)),
+                committedSnapshot is null
+                    ? await HashAsync(narrationPath, cancellationToken).ConfigureAwait(false)
+                    : HashCommittedState(committedSnapshot, voiceId)),
             cancellationToken).ConfigureAwait(false);
+    }
+
+    private static bool SameNarrationState(AdSegment left, AdSegment right) =>
+        left.SegmentId == right.SegmentId
+        && left.SceneId == right.SceneId
+        && left.Window == right.Window
+        && left.Text == right.Text
+        && left.EvidenceIds.SequenceEqual(right.EvidenceIds, StringComparer.Ordinal)
+        && left.NarrationAssetRelativePath == right.NarrationAssetRelativePath
+        && left.MeasuredNarrationDuration == right.MeasuredNarrationDuration;
+
+    private static string HashCommittedState(ProjectSnapshot snapshot, string voiceId)
+    {
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            snapshot.ProjectId,
+            snapshot.Version,
+            snapshot.SourceSha256,
+            VoiceId = voiceId,
+            snapshot.AdSegments,
+        }, JsonOptions);
+        return Convert.ToHexString(SHA256.HashData(bytes));
     }
 
     private static string ResolveProjectArtifact(string root, string relativePath)

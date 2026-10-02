@@ -2,9 +2,11 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Controls;
+using System.Windows.Input;
 using ADFi.Core;
 using ADFi.Conversation;
 using ADFi.Infrastructure;
@@ -18,6 +20,11 @@ namespace ADFi.Desktop;
 
 public partial class MainWindow : Window, IDisposable
 {
+    private static readonly JsonSerializerOptions ConversationJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     private readonly DesktopConfiguration configuration;
     private readonly HttpClient httpClient;
     private readonly AdfiApiClient apiClient;
@@ -362,6 +369,7 @@ public partial class MainWindow : Window, IDisposable
             var snapshot = await new FileProjectVersionStore(configuration.ProjectRoot)
                 .LoadCurrentAsync(project.ProjectId, lifetimeCancellation.Token);
             PresentProjectSnapshot(snapshot);
+            await LoadConversationHistoryAsync(project.ProjectDirectory, lifetimeCancellation.Token);
             Announce(snapshot.AdSegments.Count == 0
                 ? $"{project.SourceFileName} opened at {project.LatestPhase}. No draft descriptions exist yet."
                 : $"{project.SourceFileName} opened with {snapshot.AdSegments.Count} audio description segments.");
@@ -807,7 +815,8 @@ public partial class MainWindow : Window, IDisposable
                 project.ProjectDirectory,
                 focusWindow,
                 progress,
-                currentOperationCancellation.Token);
+                currentOperationCancellation.Token,
+                openedProjectSnapshot);
             await LoadLocalProjectsAsync(currentOperationCancellation.Token, project.ProjectId);
             PresentProjectSnapshot(await new FileProjectVersionStore(configuration.ProjectRoot)
                 .LoadCurrentAsync(project.ProjectId, currentOperationCancellation.Token));
@@ -888,6 +897,154 @@ public partial class MainWindow : Window, IDisposable
         Announce("Draft preview playback failed. Rebuild the preview or check the media components.");
         LogTechnical($"Draft preview playback failed: {e.ErrorException?.GetType().Name ?? "unknown error"}.");
         UpdateCreatorAccess();
+    }
+
+    private void ConversationTextBox_OnTextChanged(object sender, TextChangedEventArgs e) =>
+        UpdateCreatorAccess();
+
+    private async void ConversationTextBox_OnKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter
+            || Keyboard.Modifiers is not (ModifierKeys.None or ModifierKeys.Control))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await RunCreatorConversationAsync(ConversationTextBox.Text);
+    }
+
+    private async void SubmitConversationButton_OnClick(object sender, RoutedEventArgs e) =>
+        await RunCreatorConversationAsync(ConversationTextBox.Text);
+
+    private async void UndoLastChangeButton_OnClick(object sender, RoutedEventArgs e) =>
+        await RunCreatorConversationAsync("Undo that");
+
+    private async Task RunCreatorConversationAsync(string request)
+    {
+        if (LocalProjectsList.SelectedItem is not LocalProjectSummary project
+            || !entitlementVerified
+            || entitlement?.Plan != SubscriptionPlan.Creator
+            || openedProjectSnapshot is null
+            || project.LatestPhase < AdficationPhase.PiperNarrationAndTimingValidation
+            || project.LatestStatus != CheckpointStatus.Complete)
+        {
+            Announce("Open a narrated project with a current verified Creator subscription first.");
+            return;
+        }
+
+        request = request.Trim();
+        if (request.Length == 0)
+        {
+            Announce("Enter a project request first.");
+            ConversationTextBox.Focus();
+            return;
+        }
+
+        if (currentOperationCancellation is not null)
+        {
+            Announce("Wait for the current local operation to finish or cancel it first.");
+            return;
+        }
+
+        var assessment = await hardwareProfileStore.LoadAsync(lifetimeCancellation.Token);
+        if (assessment is null)
+        {
+            Announce("Run the Creator hardware profile before conversational review.");
+            RunHardwareProfileButton.Focus();
+            return;
+        }
+
+        var selectedSegmentId = (DescriptionsList.SelectedItem as ReviewDescriptionItem)?.Segment.SegmentId;
+        MediaInterval? requestedPreview = null;
+        var previewRequested = false;
+        currentOperationCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
+        SetLocalOperationState(running: true);
+        DraftPreviewPlayer.Stop();
+        DraftPreviewPlayer.Close();
+        loadedDraftPreviewPath = null;
+        AppendConversationHistory("You", request);
+        ConversationTextBox.Clear();
+        Announce("Planning this project request as bounded atomic tasks.");
+        try
+        {
+            var resourceProfiler = new SystemHardwareProfiler(
+                project.ProjectDirectory,
+                new ProcessHardwareCommandRunner());
+            var (freeRamBytes, freeVramBytes) = await resourceProfiler.GetCurrentFreeResourcesAsync(
+                currentOperationCancellation.Token);
+            var activeTier = ModelTierPolicy.Select(assessment.Profile with
+            {
+                FreeSystemMemoryBytes = freeRamBytes,
+                FreeVideoMemoryBytes = freeVramBytes,
+            });
+            if (freeRamBytes < activeTier.MinimumFreeRamBytes)
+            {
+                throw new InvalidOperationException(
+                    "Not enough free memory for safe conversational review. Close other applications, then try again.");
+            }
+
+            var workflow = new CreatorConversationReviewWorkflow(
+                new FileProjectVersionStore(configuration.ProjectRoot),
+                () => new OllamaModelRuntime(new HttpClient
+                {
+                    BaseAddress = new Uri("http://127.0.0.1:11434/"),
+                    Timeout = TimeSpan.FromMinutes(5),
+                }),
+                root => new PiperNarrationService(
+                    new(ResolveLocalAiPythonPath(), Path.Combine(configuration.LocalModelRoot, "piper")),
+                    Path.Combine(root, "narration", "cache"),
+                    new PiperProcessRunner()),
+                TimeProvider.System);
+            var progress = new Progress<CreatorConversationProgress>(item =>
+            {
+                Announce(item.Announcement);
+                LogTechnical(
+                    $"Project {project.ProjectId:D}: conversation task {item.CompletedTasks} of {item.TotalTasks}. {item.Announcement}");
+            });
+            var result = await workflow.RunAsync(
+                project.ProjectId,
+                project.ProjectDirectory,
+                request,
+                selectedSegmentId,
+                new(
+                    activeTier.OllamaModel,
+                    Path.Combine(AppContext.BaseDirectory, "prompts", "ADFI_PLANNER_SYSTEM.md"),
+                    Path.Combine(AppContext.BaseDirectory, "prompts", "ADFI_TASK_EXECUTOR_SYSTEM.md"),
+                    Path.Combine(AppContext.BaseDirectory, "prompts", "semantic-tools.json"),
+                    Path.Combine(AppContext.BaseDirectory, "prompts", "ADFI_AD_WRITER_SYSTEM.md"),
+                    openedProjectSnapshot.NarrationVoiceId,
+                    TimeSpan.FromMilliseconds(250)),
+                progress,
+                currentOperationCancellation.Token);
+            PresentProjectSnapshot(result.Snapshot);
+            SelectDescription(result.SelectedSegmentId);
+            AppendConversationHistory("ADFi", result.Manifest.Response);
+            previewRequested = result.Manifest.PreviewRequested;
+            requestedPreview = result.Manifest.PreviewWindow;
+            PipelineProgressBar.Value = 11;
+            Announce(result.Manifest.Response);
+            LogTechnical(
+                $"Project {project.ProjectId:D}: conversation turn {result.Manifest.TurnId:D} completed with " +
+                $"{result.Manifest.Results.Count} persisted task result(s). Version {result.Snapshot.Version}.");
+        }
+        catch (Exception exception)
+        {
+            AppendConversationHistory("ADFi", $"Request failed safely. {exception.Message}");
+            ReportError("Creator conversation", exception);
+        }
+        finally
+        {
+            currentOperationCancellation.Dispose();
+            currentOperationCancellation = null;
+            SetLocalOperationState(running: false);
+            ConversationTextBox.Focus();
+        }
+
+        if (previewRequested)
+        {
+            await BuildAndLoadDraftPreviewAsync(requestedPreview, autoPlay: true);
+        }
     }
 
     private async void RefreshDiscoverButton_OnClick(object sender, RoutedEventArgs e)
@@ -1266,8 +1423,14 @@ public partial class MainWindow : Window, IDisposable
                                                && !operationRunning
                                                && DescriptionsList.SelectedItem is ReviewDescriptionItem;
         ReviewGroup.IsEnabled = selected;
-        ConversationTextBox.IsEnabled = canReviewConversationally;
-        SubmitConversationButton.IsEnabled = false;
+        var canRunConversation = canReviewConversationally
+                                 && canPreview
+                                 && openedProjectSnapshot is { AdSegments.Count: > 0 }
+                                 && !operationRunning;
+        ConversationTextBox.IsEnabled = canRunConversation;
+        SubmitConversationButton.IsEnabled = canRunConversation
+                                             && !string.IsNullOrWhiteSpace(ConversationTextBox.Text);
+        UndoLastChangeButton.IsEnabled = canRunConversation && openedProjectSnapshot!.Version > 2;
     }
 
     private void SetLocalOperationState(bool running)
@@ -1406,6 +1569,70 @@ public partial class MainWindow : Window, IDisposable
         UpdateCreatorAccess();
     }
 
+    private void SelectDescription(string? segmentId)
+    {
+        if (segmentId is null || DescriptionsList.ItemsSource is not IEnumerable<ReviewDescriptionItem> items)
+        {
+            return;
+        }
+
+        var selected = items.SingleOrDefault(item => item.Segment.SegmentId == segmentId);
+        if (selected is not null)
+        {
+            DescriptionsList.SelectedItem = selected;
+            DescriptionsList.ScrollIntoView(selected);
+        }
+    }
+
+    private void AppendConversationHistory(string speaker, string text)
+    {
+        if (ConversationHistoryTextBox.Text.Length > 0)
+        {
+            ConversationHistoryTextBox.AppendText(Environment.NewLine + Environment.NewLine);
+        }
+
+        ConversationHistoryTextBox.AppendText($"{speaker}: {text.Trim()}");
+        ConversationHistoryTextBox.ScrollToEnd();
+    }
+
+    private async Task LoadConversationHistoryAsync(
+        string projectDirectory,
+        CancellationToken cancellationToken)
+    {
+        ConversationHistoryTextBox.Clear();
+        var turns = Path.Combine(Path.GetFullPath(projectDirectory), "conversation", "turns");
+        if (!Directory.Exists(turns))
+        {
+            return;
+        }
+
+        var paths = Directory.EnumerateFiles(turns, "turn.json", SearchOption.AllDirectories)
+            .OrderBy(path => File.GetLastWriteTimeUtc(path))
+            .TakeLast(20)
+            .ToArray();
+        foreach (var path in paths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await using var stream = File.OpenRead(path);
+                var turn = await JsonSerializer.DeserializeAsync<CreatorConversationTurnManifest>(
+                    stream,
+                    ConversationJsonOptions,
+                    cancellationToken);
+                if (turn is not null)
+                {
+                    AppendConversationHistory("You", turn.UserRequest);
+                    AppendConversationHistory("ADFi", turn.Response);
+                }
+            }
+            catch (JsonException)
+            {
+                LogTechnical("Ignored one invalid local conversation-turn record for project history.");
+            }
+        }
+    }
+
     private void LoadDraftPreview(string path, bool autoPlay, string label)
     {
         var fullPath = Path.GetFullPath(path);
@@ -1429,6 +1656,8 @@ public partial class MainWindow : Window, IDisposable
     {
         openedProjectSnapshot = null;
         DescriptionsList.ItemsSource = null;
+        ConversationHistoryTextBox.Clear();
+        ConversationTextBox.Clear();
         loadedDraftPreviewPath = null;
         playDraftPreviewWhenOpened = false;
         DraftPreviewPlayer.Stop();

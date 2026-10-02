@@ -18,6 +18,7 @@ public sealed record TaskPlan(
 public static class TaskPlanValidator
 {
     public const string CurrentSchemaVersion = "1.0";
+    public const int MaximumTasksPerTurn = 32;
 
     public static void Validate(TaskPlan plan)
     {
@@ -32,15 +33,31 @@ public static class TaskPlanValidator
             throw new InvalidOperationException("A nontrivial request must contain at least one atomic task.");
         }
 
+        if (plan.Tasks.Count > MaximumTasksPerTurn)
+        {
+            throw new InvalidOperationException(
+                $"A task plan may contain at most {MaximumTasksPerTurn} atomic tasks.");
+        }
+
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var task in plan.Tasks)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(task.TaskId);
             ArgumentException.ThrowIfNullOrWhiteSpace(task.Objective);
             ArgumentException.ThrowIfNullOrWhiteSpace(task.ExpectedOutput);
+            if (task.TaskId.Length > 80 || task.Objective.Length > 500 || task.ExpectedOutput.Length > 500)
+            {
+                throw new InvalidOperationException($"Task {task.TaskId} exceeds the bounded task-plan text limits.");
+            }
+
             if (!ids.Add(task.TaskId))
             {
                 throw new InvalidOperationException($"Duplicate task ID: {task.TaskId}");
+            }
+
+            if (task.Dependencies.Count != task.Dependencies.Distinct(StringComparer.Ordinal).Count())
+            {
+                throw new InvalidOperationException($"Task {task.TaskId} contains duplicate dependencies.");
             }
 
             foreach (var dependency in task.Dependencies)
@@ -62,9 +79,10 @@ public static class TaskPlanValidator
         ArgumentNullException.ThrowIfNull(registeredToolNames);
         foreach (var task in plan.Tasks)
         {
-            if (task.AllowedTools.Count == 0)
+            if (task.AllowedTools.Count != 1)
             {
-                throw new InvalidOperationException($"Task {task.TaskId} has no allowed semantic tool.");
+                throw new InvalidOperationException(
+                    $"Task {task.TaskId} must authorize exactly one semantic tool.");
             }
 
             var unsupported = task.AllowedTools
@@ -194,7 +212,9 @@ public sealed record TaskResult(
     bool Succeeded,
     string OutputJson,
     IReadOnlyList<string> EvidenceIds,
-    string? ErrorCode);
+    string? ErrorCode,
+    string? ToolName = null,
+    PromptDecisionProvenance? Provenance = null);
 
 public interface IAtomicTaskExecutor
 {

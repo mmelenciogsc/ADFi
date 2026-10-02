@@ -6,6 +6,7 @@ public enum ProjectMutationKind
     ReplaceAdSegment,
     RemoveAdSegment,
     SelectNarrationVoice,
+    RegenerateNarration,
     Undo,
     RestoreCheckpoint,
 }

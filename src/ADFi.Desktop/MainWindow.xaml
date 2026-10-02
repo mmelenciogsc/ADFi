@@ -319,17 +319,44 @@
                                            Text="No draft preview is loaded."
                                            TextWrapping="Wrap"
                                            AutomationProperties.Name="Draft preview playback status" />
+                                <TextBlock x:Name="CreatorEditingModeText"
+                                           Margin="4,8,4,2"
+                                           FontWeight="SemiBold"
+                                           Text="Creator editing — changes require validation and commit."
+                                           TextWrapping="Wrap"
+                                           AutomationProperties.Name="Creator editing mode" />
+                                <Label Target="{Binding ElementName=ConversationHistoryTextBox}" Content="Conversation _history" />
+                                <TextBox x:Name="ConversationHistoryTextBox"
+                                         MinHeight="100"
+                                         MaxHeight="220"
+                                         TabIndex="29"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         AutomationProperties.Name="Creator project conversation history"
+                                         AutomationProperties.HelpText="Completed requests and validated results. Model tokens and technical logs are not announced here." />
                                 <Label Target="{Binding ElementName=ConversationTextBox}" Content="Project _request" />
                                 <TextBox x:Name="ConversationTextBox"
-                                         TabIndex="29"
+                                         TabIndex="30"
+                                         TextChanged="ConversationTextBox_OnTextChanged"
+                                         KeyDown="ConversationTextBox_OnKeyDown"
                                          AutomationProperties.Name="Natural conversation project request"
-                                         AutomationProperties.HelpText="Enter one request. ADFi will plan compound requests as dependency-safe atomic tasks." />
+                                         AutomationProperties.HelpText="Enter one request. Press Enter or Control Enter to submit. ADFi plans compound requests as dependency-safe atomic tasks." />
                                 <WrapPanel>
                                     <Button x:Name="SubmitConversationButton"
                                             Content="_Submit request"
-                                            TabIndex="30"
+                                            TabIndex="31"
                                             IsEnabled="False"
+                                            Click="SubmitConversationButton_OnClick"
                                             AutomationProperties.Name="Submit project request" />
+                                    <Button x:Name="UndoLastChangeButton"
+                                            Content="_Undo last committed change"
+                                            TabIndex="32"
+                                            IsEnabled="False"
+                                            Click="UndoLastChangeButton_OnClick"
+                                            AutomationProperties.Name="Undo last committed project change"
+                                            AutomationProperties.HelpText="Creates a compensating version. Existing project history is never erased." />
                                 </WrapPanel>
                             </StackPanel>
                         </GroupBox>
@@ -341,7 +368,7 @@
                                 <TextBlock Text="On hold or disputed: unavailable until account services are connected" TextWrapping="Wrap" />
                                 <TextBlock Text="Lifetime earnings: unavailable until account services are connected" TextWrapping="Wrap" />
                                 <Button Content="View earnings _details"
-                                        TabIndex="31"
+                                        TabIndex="33"
                                         IsEnabled="False"
                                         HorizontalAlignment="Left"
                                         AutomationProperties.Name="View explainable earnings details" />
@@ -350,12 +377,12 @@
 
                         <Expander Header="Technical activity"
                                   Margin="4"
-                                  TabIndex="32"
+                                  TabIndex="34"
                                   AutomationProperties.Name="Technical activity for advanced users">
                             <TextBox x:Name="TechnicalActivityTextBox"
                                      Margin="8"
                                      MinHeight="110"
-                                     TabIndex="33"
+                                     TabIndex="35"
                                      IsReadOnly="True"
                                      AcceptsReturn="True"
                                      TextWrapping="Wrap"
@@ -386,7 +413,7 @@
                     <WrapPanel Grid.Row="2" Margin="0,0,0,8">
                         <Button x:Name="RefreshDiscoverButton"
                                 Content="_Refresh DISCOVER"
-                                TabIndex="34"
+                                TabIndex="36"
                                 Click="RefreshDiscoverButton_OnClick"
                                 AutomationProperties.Name="Refresh public ADFied works" />
                         <TextBlock x:Name="DiscoverStateText"
@@ -397,7 +424,7 @@
                     </WrapPanel>
                     <ListView Grid.Row="3"
                               x:Name="DiscoverProjects"
-                              TabIndex="35"
+                              TabIndex="37"
                               AutomationProperties.Name="Public ADFied works"
                               AutomationProperties.HelpText="Use arrow keys to select a work. Open it to use the official YouTube player on its ADFi page."
                               SelectionMode="Single"
@@ -420,20 +447,20 @@
                     <WrapPanel Grid.Row="4" Margin="0,8,0,0">
                         <Button x:Name="OpenDiscoverProjectButton"
                                 Content="_Open selected ADFi page"
-                                TabIndex="36"
+                                TabIndex="38"
                                 IsEnabled="False"
                                 Click="OpenDiscoverProjectButton_OnClick"
                                 AutomationProperties.Name="Open selected ADFi project page in the default browser"
                                 AutomationProperties.HelpText="The project page uses the official YouTube player." />
                         <Button x:Name="CopyDiscoverProjectButton"
                                 Content="_Copy selected project page"
-                                TabIndex="37"
+                                TabIndex="39"
                                 IsEnabled="False"
                                 Click="CopyDiscoverProjectButton_OnClick"
                                 AutomationProperties.Name="Copy selected ADFi project page address" />
                         <Button x:Name="OpenDiscoverViewerButton"
                                 Content="Open in accessible _viewer"
-                                TabIndex="38"
+                                TabIndex="40"
                                 IsEnabled="False"
                                 Click="OpenDiscoverViewerButton_OnClick"
                                 AutomationProperties.Name="Open selected ADFi publication in the Accessible Interactive Video Viewer"

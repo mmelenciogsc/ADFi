@@ -8,7 +8,16 @@ public sealed record PlannerContext(
     int ProjectVersion,
     TimeSpan MediaDuration,
     IReadOnlyList<string> KnownSceneIds,
-    IReadOnlyList<string> UnresolvedSceneIds);
+    IReadOnlyList<string> UnresolvedSceneIds,
+    IReadOnlySet<string>? AllowedToolNames = null);
+
+public interface IConversationPlanner
+{
+    Task<PlannedConversation> PlanAsync(
+        string userText,
+        PlannerContext context,
+        CancellationToken cancellationToken);
+}
 
 public sealed record PlannedConversation(
     ClassifiedConversationIntent Classification,
@@ -20,11 +29,11 @@ public sealed class LocalConversationPlanner(
     string modelName,
     string plannerPromptPath,
     string semanticToolsPath,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider) : IConversationPlanner
 {
     private const string TaskPlanSchema =
         """
-        {"type":"object","required":["schemaVersion","userRequest","tasks"],"properties":{"schemaVersion":{"const":"1.0"},"userRequest":{"type":"string"},"tasks":{"type":"array","minItems":1,"items":{"type":"object","required":["taskId","objective","expectedOutput","dependencies","allowedTools"],"properties":{"taskId":{"type":"string"},"objective":{"type":"string"},"expectedOutput":{"type":"string"},"dependencies":{"type":"array","items":{"type":"string"}},"allowedTools":{"type":"array","minItems":1,"items":{"type":"string"}}},"additionalProperties":false}}},"additionalProperties":false}
+        {"type":"object","required":["schemaVersion","userRequest","tasks"],"properties":{"schemaVersion":{"const":"1.0"},"userRequest":{"type":"string"},"tasks":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"object","required":["taskId","objective","expectedOutput","dependencies","allowedTools"],"properties":{"taskId":{"type":"string","maxLength":80},"objective":{"type":"string","maxLength":500},"expectedOutput":{"type":"string","maxLength":500},"dependencies":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"allowedTools":{"type":"array","minItems":1,"maxItems":1,"items":{"type":"string"}}},"additionalProperties":false}}},"additionalProperties":false}
         """;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -49,6 +58,15 @@ public sealed class LocalConversationPlanner(
             .ConfigureAwait(false);
         var tools = await SemanticToolContractLoader.LoadAndValidateAsync(semanticToolsPath, cancellationToken)
             .ConfigureAwait(false);
+        var registeredTools = tools.Tools
+            .Select(tool => tool.Name)
+            .Where(tool => context.AllowedToolNames is null || context.AllowedToolNames.Contains(tool))
+            .ToHashSet(StringComparer.Ordinal);
+        if (registeredTools.Count == 0)
+        {
+            throw new InvalidOperationException("No semantic tools are enabled for this conversation mode.");
+        }
+
         await runtime.EnsureModelAvailableAsync(modelName, cancellationToken).ConfigureAwait(false);
         LocalModelResponse response;
         try
@@ -62,7 +80,7 @@ public sealed class LocalConversationPlanner(
                 mediaDurationMilliseconds = checked((long)context.MediaDuration.TotalMilliseconds),
                 context.KnownSceneIds,
                 context.UnresolvedSceneIds,
-                registeredSemanticTools = tools.Tools.Select(tool => tool.Name).ToArray(),
+                registeredSemanticTools = registeredTools.Order(StringComparer.Ordinal).ToArray(),
             });
             response = await runtime.GenerateAsync(
                 modelName,
@@ -76,9 +94,7 @@ public sealed class LocalConversationPlanner(
 
         var plan = JsonSerializer.Deserialize<TaskPlan>(response.Content, JsonOptions)
                    ?? throw new InvalidDataException("The local planner returned no TaskPlan.");
-        TaskPlanValidator.Validate(
-            plan,
-            tools.Tools.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal));
+        TaskPlanValidator.Validate(plan, registeredTools);
         if (!string.Equals(plan.UserRequest, userText, StringComparison.Ordinal))
         {
             throw new InvalidDataException("The local planner changed the user's request.");

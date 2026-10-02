@@ -98,8 +98,52 @@ public sealed class CreatorPreviewWorkflowTests
             Assert.Equal(first.Manifest.FullDraftSha256, focused.Manifest.FullDraftSha256);
             Assert.Equal(focusWindow, focused.Manifest.FocusWindow);
 
-            await File.WriteAllBytesAsync(first.FullDraftPath, [1, 2, 3], cancellationToken);
-            var repaired = await workflow.RunAsync(projectId, project, null, null, cancellationToken);
+            var editedRelative = "narration/cache/edited.wav";
+            var editedPath = Path.Combine(project, "narration", "cache", "edited.wav");
+            WriteWave(editedPath, TimeSpan.FromMilliseconds(300));
+            var editedSegment = segment with
+            {
+                Text = "A concise title appears.",
+                NarrationAssetRelativePath = editedRelative,
+                MeasuredNarrationDuration = TimeSpan.FromMilliseconds(300),
+                UserApproved = true,
+            };
+            var committedSnapshot = new ProjectSnapshot(
+                projectId,
+                2,
+                intake.Source.SourceSha256,
+                intake.Source.Probe.Duration,
+                [editedSegment],
+                "voice-1",
+                DateTimeOffset.UtcNow,
+                null);
+            var committed = await workflow.RunAsync(
+                projectId,
+                project,
+                null,
+                null,
+                cancellationToken,
+                committedSnapshot);
+            var committedRestored = await workflow.RunAsync(
+                projectId,
+                project,
+                null,
+                null,
+                cancellationToken,
+                committedSnapshot);
+
+            Assert.False(committed.ReusedFullDraft);
+            Assert.True(committedRestored.ReusedFullDraft);
+            Assert.NotEqual(focused.Manifest.NarrationInputSha256, committed.Manifest.NarrationInputSha256);
+
+            await File.WriteAllBytesAsync(committed.FullDraftPath, [1, 2, 3], cancellationToken);
+            var repaired = await workflow.RunAsync(
+                projectId,
+                project,
+                null,
+                null,
+                cancellationToken,
+                committedSnapshot);
 
             Assert.False(repaired.ReusedFullDraft);
             Assert.Equal(

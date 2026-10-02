@@ -16,6 +16,34 @@ public sealed class TaskPlanningTests
     }
 
     [Fact]
+    public void ModelPlanMustAuthorizeExactlyOneRegisteredToolPerTask()
+    {
+        var registered = new HashSet<string>(["GetScene", "ValidateProject"], StringComparer.Ordinal);
+        var plan = new TaskPlan(
+            TaskPlanValidator.CurrentSchemaVersion,
+            "Example",
+            [new("task-1", "Do one thing", "One result", [], ["GetScene", "ValidateProject"])]);
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            TaskPlanValidator.Validate(plan, registered));
+
+        Assert.Contains("exactly one", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ModelPlanHasABoundedTaskCount()
+    {
+        var plan = new TaskPlan(
+            TaskPlanValidator.CurrentSchemaVersion,
+            "Example",
+            Enumerable.Range(1, TaskPlanValidator.MaximumTasksPerTurn + 1)
+                .Select(index => new AtomicTask($"task-{index}", "One", "One", [], ["GetScene"]))
+                .ToArray());
+
+        Assert.Throws<InvalidOperationException>(() => TaskPlanValidator.Validate(plan));
+    }
+
+    [Fact]
     public async Task ProcessorPersistsEachResultAndStopsAtFirstFailure()
     {
         var executor = new RecordingExecutor(failTaskId: "task-2");
@@ -61,4 +89,3 @@ public sealed class TaskPlanningTests
         }
     }
 }
-

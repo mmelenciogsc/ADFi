@@ -62,4 +62,48 @@ public sealed class ProjectMutationTests
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task NarrationRevisionCommitsTextAudioAndVoiceAsOneVersion()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"adfi-versions-{Guid.NewGuid():N}");
+        var projectId = Guid.NewGuid();
+        var segment = new AdSegment(
+            "ad-1", "scene-1", new(TimeSpan.Zero, TimeSpan.FromSeconds(3)), "Original text.",
+            ["frame-1"], "writer", "1", new string('A', 64), "narration/old.wav",
+            TimeSpan.FromSeconds(1), false);
+        try
+        {
+            var store = new FileProjectVersionStore(root);
+            await store.InitializeAsync(
+                new(projectId, 1, new string('C', 64), TimeSpan.FromMinutes(1), [segment], "voice-1", DateTimeOffset.UnixEpoch, null),
+                TestContext.Current.CancellationToken);
+            var replacement = segment with
+            {
+                Text = "Shorter.",
+                NarrationAssetRelativePath = "narration/new.wav",
+                MeasuredNarrationDuration = TimeSpan.FromMilliseconds(600),
+                UserApproved = true,
+            };
+
+            var changed = await new ProjectMutationService(store, TimeProvider.System).ReplaceNarrationAsync(
+                projectId,
+                1,
+                [replacement],
+                "voice-3",
+                new HashSet<string>(["frame-1"], StringComparer.Ordinal),
+                new HashSet<string>(["narration/new.wav"], StringComparer.Ordinal),
+                "Validated conversation edit.",
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(2, changed.Version);
+            Assert.Equal("voice-3", changed.NarrationVoiceId);
+            Assert.Equal("Shorter.", Assert.Single(changed.AdSegments).Text);
+            Assert.True(changed.AdSegments[0].UserApproved);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
 }

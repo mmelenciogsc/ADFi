@@ -52,7 +52,10 @@ public sealed class RepositoryArchitectureTests
             "PlayDraftPreviewButton",
             "PauseDraftPreviewButton",
             "PlaySelectionPreviewButton",
+            "ConversationHistoryTextBox",
             "ConversationTextBox",
+            "SubmitConversationButton",
+            "UndoLastChangeButton",
             "RefreshDiscoverButton",
             "DiscoverProjects",
             "OpenDiscoverProjectButton",
@@ -80,7 +83,7 @@ public sealed class RepositoryArchitectureTests
             .Where(value => value is not null)
             .Select(value => int.Parse(value!, System.Globalization.CultureInfo.InvariantCulture))
             .ToArray();
-        Assert.Equal(Enumerable.Range(1, 38), tabIndices.Order());
+        Assert.Equal(Enumerable.Range(1, 40), tabIndices.Order());
     }
 
     [Fact]
