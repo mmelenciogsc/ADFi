@@ -323,14 +323,12 @@ public sealed partial class FinalProjectValidationService(
 
         var scenes = visual?.Scenes.ToDictionary(item => item.SceneId, StringComparer.Ordinal)
                      ?? new Dictionary<string, VisualScene>(StringComparer.Ordinal);
-        var keyframes = visual?.Scenes.SelectMany(item => item.Keyframes)
-            .ToDictionary(item => item.EvidenceId, StringComparer.Ordinal)
-            ?? new Dictionary<string, KeyframeEvidence>(StringComparer.Ordinal);
         var analyses = analysis?.Scenes.ToDictionary(item => item.SceneId, StringComparer.Ordinal)
                        ?? new Dictionary<string, VisualSceneAnalysis>(StringComparer.Ordinal);
         foreach (var segment in snapshot.AdSegments)
         {
-            if (!scenes.TryGetValue(segment.SceneId, out var scene))
+            var scene = scenes.GetValueOrDefault(segment.SceneId);
+            if (scene is null)
             {
                 Add(issues, "SCENE_MISSING", "Description references a scene that is absent from the final visual index.", segment.SegmentId, segment.EvidenceIds);
             }
@@ -345,7 +343,12 @@ public sealed partial class FinalProjectValidationService(
 
             foreach (var evidenceId in segment.EvidenceIds)
             {
-                if (!keyframes.TryGetValue(evidenceId, out var keyframe))
+                // Evidence IDs are content-derived and may legitimately recur when identical
+                // frames (for example black frames) appear in different scenes. Resolve the
+                // asset through the segment's committed scene instead of assuming global ID
+                // uniqueness or selecting an arbitrary occurrence.
+                var keyframe = scene?.Keyframes.FirstOrDefault(item => item.EvidenceId == evidenceId);
+                if (keyframe is null)
                 {
                     continue;
                 }

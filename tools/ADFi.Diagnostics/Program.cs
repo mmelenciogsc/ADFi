@@ -180,7 +180,8 @@ internal static class Program
                 .ConfigureAwait(false);
             await PersistInitialDraftAsync(projectStore, projectId, drafted, cancellationToken).ConfigureAwait(false);
             var snapshot = await projectStore.LoadCurrentAsync(projectId, cancellationToken).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(options.ApprovedReviewText))
+            if (!string.IsNullOrWhiteSpace(options.ApprovedReviewText)
+                || !string.IsNullOrWhiteSpace(options.ApprovedReviewFile))
             {
                 snapshot = await ApplyApprovedDiagnosticReviewAsync(
                     projectStore,
@@ -365,8 +366,14 @@ internal static class Program
 
                 if (current.AdSegments.Any(item => item.UserApproved))
                 {
+                    if (current.NarrationVoiceId == result.Narration.VoiceId
+                        && GeneratedSegmentsMatchReviewedState(current.AdSegments, generated))
+                    {
+                        return;
+                    }
+
                     throw new InvalidOperationException(
-                        "The resumed diagnostic project contains reviewed state that will not be overwritten.");
+                        "The resumed diagnostic project contains reviewed state whose generated evidence or timing changed; it will not be overwritten.");
                 }
             }
 
@@ -413,53 +420,74 @@ internal static class Program
                 return current;
             }
 
-            if (unresolved.Length != 1)
+            var approved = await LoadApprovedReviewsAsync(options, unresolved, cancellationToken).ConfigureAwait(false);
+            var alreadyReviewed = current.AdSegments
+                .Where(item => item.UserApproved)
+                .ToDictionary(item => item.SegmentId, StringComparer.Ordinal);
+            foreach (var prior in alreadyReviewed)
             {
-                throw new InvalidOperationException(
-                    "--approved-review-text is only valid when exactly one narration segment requires review.");
+                if (!approved.TryGetValue(prior.Key, out var approvedText)
+                    || !string.Equals(prior.Value.Text, approvedText, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "The approved review input does not match the project's existing reviewed narration state.");
+                }
             }
 
-            var text = options.ApprovedReviewText!.Trim();
-            var sourceSegment = unresolved[0].Segment;
+            var outstanding = unresolved
+                .Where(item => !alreadyReviewed.ContainsKey(item.Segment.SegmentId))
+                .ToArray();
+            if (outstanding.Length == 0)
+            {
+                return current;
+            }
+
             var synthesizer = new PiperNarrationService(
                 new(options.PythonExecutable, Path.Combine(options.ModelRoot, "piper")),
                 Path.Combine(projectDirectory, "narration", "cache"),
                 new PiperProcessRunner());
-            var synthesis = await synthesizer.SynthesizeAsync(
-                new(
-                    sourceSegment.SegmentId,
-                    text,
-                    result.Narration.VoiceId,
-                    sourceSegment.Window.Duration,
-                    TimeSpan.FromMilliseconds(250),
-                    1),
-                cancellationToken).ConfigureAwait(false);
-            if (!synthesis.Fit.Fits)
+            var replacements = new Dictionary<string, AdSegment>(StringComparer.Ordinal);
+            foreach (var item in outstanding)
             {
-                throw new InvalidOperationException(
-                    $"The explicitly reviewed narration still exceeds its window: {synthesis.MeasuredDuration} rendered, "
-                    + $"{synthesis.Fit.Available} available.");
+                var sourceSegment = item.Segment;
+                var text = approved[sourceSegment.SegmentId];
+                var synthesis = await synthesizer.SynthesizeAsync(
+                    new(
+                        sourceSegment.SegmentId,
+                        text,
+                        result.Narration.VoiceId,
+                        sourceSegment.Window.Duration,
+                        TimeSpan.FromMilliseconds(250),
+                        1),
+                    cancellationToken).ConfigureAwait(false);
+                if (!synthesis.Fit.Fits)
+                {
+                    throw new InvalidOperationException(
+                        $"The explicitly reviewed narration for {sourceSegment.SegmentId} still exceeds its window: "
+                        + $"{synthesis.MeasuredDuration} rendered, {synthesis.Fit.Available} available.");
+                }
+
+                var relativeAudio = Path.GetRelativePath(projectDirectory, synthesis.AudioPath).Replace('\\', '/');
+                if (relativeAudio.StartsWith("../", StringComparison.Ordinal) || Path.IsPathRooted(relativeAudio))
+                {
+                    throw new InvalidDataException("Reviewed narration was written outside the diagnostic project.");
+                }
+
+                replacements[sourceSegment.SegmentId] = sourceSegment with
+                {
+                    Text = text,
+                    NarrationAssetRelativePath = relativeAudio,
+                    MeasuredNarrationDuration = synthesis.MeasuredDuration,
+                    UserApproved = true,
+                };
             }
 
-            var relativeAudio = Path.GetRelativePath(projectDirectory, synthesis.AudioPath).Replace('\\', '/');
-            if (relativeAudio.StartsWith("../", StringComparison.Ordinal) || Path.IsPathRooted(relativeAudio))
-            {
-                throw new InvalidDataException("Reviewed narration was written outside the diagnostic project.");
-            }
-
-            var reviewed = sourceSegment with
-            {
-                Text = text,
-                NarrationAssetRelativePath = relativeAudio,
-                MeasuredNarrationDuration = synthesis.MeasuredDuration,
-                UserApproved = true,
-            };
             var segments = current.AdSegments
-                .Select(item => item.SegmentId == reviewed.SegmentId ? reviewed : item)
+                .Select(item => replacements.GetValueOrDefault(item.SegmentId, item))
                 .ToArray();
-            if (!segments.Any(item => item.SegmentId == reviewed.SegmentId))
+            if (replacements.Keys.Any(id => !segments.Any(item => item.SegmentId == id)))
             {
-                throw new InvalidDataException("The reviewed narration segment is not present in project state.");
+                throw new InvalidDataException("A reviewed narration segment is not present in project state.");
             }
 
             var now = TimeProvider.System.GetUtcNow();
@@ -478,12 +506,68 @@ internal static class Program
                     current.Version,
                     next.Version,
                     ProjectMutationKind.ReplaceAdSegment,
-                    "Explicitly approved wording for the single timing-blocked real-media diagnostic segment.",
+                    $"Explicitly approved wording for {replacements.Count} timing-blocked real-media diagnostic segment(s).",
                     now),
                 current.Version,
                 cancellationToken).ConfigureAwait(false);
-            WriteLine($"Applied explicit diagnostic review to {reviewed.SegmentId}: {text}");
+            foreach (var replacement in replacements.Values)
+            {
+                WriteLine($"Applied explicit diagnostic review to {replacement.SegmentId}: {replacement.Text}");
+            }
+
             return next;
+        }
+
+        private static async Task<IReadOnlyDictionary<string, string>> LoadApprovedReviewsAsync(
+            DiagnosticOptions options,
+            NarrationSegmentManifest[] unresolved,
+            CancellationToken cancellationToken)
+        {
+            if (!string.IsNullOrWhiteSpace(options.ApprovedReviewText))
+            {
+                if (unresolved.Length != 1)
+                {
+                    throw new InvalidOperationException(
+                        "--approved-review-text is only valid when exactly one narration segment requires review; use --approved-review-file for multiple segments.");
+                }
+
+                return new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [unresolved[0].Segment.SegmentId] = options.ApprovedReviewText.Trim(),
+                };
+            }
+
+            var path = Path.GetFullPath(options.ApprovedReviewFile!);
+            await using var stream = File.OpenRead(path);
+            var file = await JsonSerializer.DeserializeAsync<DiagnosticApprovedReviewFile>(
+                stream,
+                JsonOptions,
+                cancellationToken).ConfigureAwait(false)
+                       ?? throw new InvalidDataException("The approved-review file is empty.");
+            if (file.SchemaVersion != "adfi.diagnostic-approved-review.v1")
+            {
+                throw new InvalidDataException("The approved-review file has an unsupported schema version.");
+            }
+
+            var reviews = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var review in file.Reviews)
+            {
+                if (string.IsNullOrWhiteSpace(review.SegmentId)
+                    || string.IsNullOrWhiteSpace(review.Text)
+                    || !reviews.TryAdd(review.SegmentId, review.Text.Trim()))
+                {
+                    throw new InvalidDataException("The approved-review file contains a blank or duplicate entry.");
+                }
+            }
+
+            var expected = unresolved.Select(item => item.Segment.SegmentId).ToHashSet(StringComparer.Ordinal);
+            if (!expected.SetEquals(reviews.Keys))
+            {
+                throw new InvalidDataException(
+                    "The approved-review file must contain exactly one entry for every timing-blocked narration segment.");
+            }
+
+            return reviews;
         }
 
         private static bool SegmentsMatch(IReadOnlyList<AdSegment> left, AdSegment[] right) =>
@@ -502,6 +586,20 @@ internal static class Program
                 && pair.First.UserApproved == pair.Second.UserApproved
                 && pair.First.InputFingerprint == pair.Second.InputFingerprint);
 
+        private static bool GeneratedSegmentsMatchReviewedState(
+            IReadOnlyList<AdSegment> reviewed,
+            AdSegment[] generated) =>
+            reviewed.Count == generated.Length
+            && reviewed.Zip(generated).All(pair =>
+                pair.First.SegmentId == pair.Second.SegmentId
+                && pair.First.SceneId == pair.Second.SceneId
+                && pair.First.Window == pair.Second.Window
+                && pair.First.EvidenceIds.SequenceEqual(pair.Second.EvidenceIds, StringComparer.Ordinal)
+                && pair.First.PromptId == pair.Second.PromptId
+                && pair.First.PromptVersion == pair.Second.PromptVersion
+                && pair.First.PromptSha256 == pair.Second.PromptSha256
+                && pair.First.InputFingerprint == pair.Second.InputFingerprint);
+
         private static void WriteLine(string message) =>
             Console.WriteLine(FormattableString.Invariant($"{DateTimeOffset.Now:HH:mm:ss}  {message}"));
     }
@@ -515,6 +613,7 @@ internal static class Program
         string ModelRoot,
         string VoiceId,
         string? ApprovedReviewText,
+        string? ApprovedReviewFile,
         Guid DiagnosticUserId)
     {
         public static DiagnosticOptions Parse(string[] args)
@@ -554,6 +653,13 @@ internal static class Program
 
             var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             var adfiLocal = Path.Combine(localData, "ADFi");
+            if (values.ContainsKey("--approved-review-text")
+                && values.ContainsKey("--approved-review-file"))
+            {
+                throw new ArgumentException(
+                    "Use either --approved-review-text or --approved-review-file, not both.");
+            }
+
             return new(
                 Path.GetFullPath(source),
                 values.GetValueOrDefault("--label", Path.GetFileNameWithoutExtension(source)),
@@ -569,6 +675,9 @@ internal static class Program
                     Path.Combine(adfiLocal, "models"))),
                 values.GetValueOrDefault("--voice", "voice-1"),
                 values.GetValueOrDefault("--approved-review-text"),
+                values.TryGetValue("--approved-review-file", out var reviewFile)
+                    ? Path.GetFullPath(reviewFile)
+                    : null,
                 Guid.Parse(values.GetValueOrDefault("--diagnostic-user-id", "00000000-0000-0000-0000-000000000001")));
         }
 
@@ -612,6 +721,12 @@ internal static class Program
         DateTimeOffset CompletedAtUtc);
 
     private sealed record DiagnosticRunResult(string FinalVideoPath, string ReportPath);
+
+    private sealed record DiagnosticApprovedReviewFile(
+        string SchemaVersion,
+        IReadOnlyList<DiagnosticApprovedReview> Reviews);
+
+    private sealed record DiagnosticApprovedReview(string SegmentId, string Text);
 
     private sealed class InlineProgress<T>(Action<T> callback) : IProgress<T>
     {

@@ -156,6 +156,164 @@ public sealed class AdDraftCoordinatorTests
         }
     }
 
+    [Fact]
+    public async Task MalformedDraftGetsBoundedRetryAndRetainsRejectedOutput()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"adfi-draft-malformed-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var runtime = new QueueRuntime(
+                "{\"text\":\"unterminated",
+                "{\"text\":\"She pockets a key.\",\"evidenceIds\":[\"frame-1\"],\"uncertainty\":null,\"reason\":\"Visible action\"}");
+            var coordinator = new AdDraftCoordinator(
+                runtime,
+                "qwen-test",
+                Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_AD_WRITER_SYSTEM.md"));
+            var opportunity = new ProposedAdInterval(
+                "retry", "scene-1", new(TimeSpan.Zero, TimeSpan.FromSeconds(4)), 4_000,
+                ["frame-1"], [], "Visible action", 1m, 1m);
+            var fact = new VisualFact(
+                "fact", "scene-1", "She pockets a key.", 1m, 1m, false,
+                TimeSpan.Zero, null, ["frame-1"]);
+
+            var result = await coordinator.DraftAsync(
+                Guid.NewGuid(), root, [new(opportunity, [fact], [], [])], TestContext.Current.CancellationToken);
+
+            Assert.Equal("She pockets a key.", Assert.Single(result).Text);
+            Assert.Equal(2, runtime.GenerationCount);
+            Assert.True(File.Exists(Path.Combine(
+                root,
+                "ad",
+                "drafts",
+                "rejected",
+                "ad-retry-attempt-01.json")));
+            Assert.True(runtime.Unloaded);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task TruncatedAuxiliaryFieldRecoversOnlyCompleteValidatedCoreFields()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"adfi-draft-recover-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var runtime = new QueueRuntime(
+                "{\"text\":\"She pockets a key.\",\"evidenceIds\":[\"frame-1\"],\"uncertainty\":null,\"reason\":\"truncated");
+            var coordinator = new AdDraftCoordinator(
+                runtime,
+                "qwen-test",
+                Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_AD_WRITER_SYSTEM.md"));
+            var opportunity = new ProposedAdInterval(
+                "recover", "scene-1", new(TimeSpan.Zero, TimeSpan.FromSeconds(4)), 4_000,
+                ["frame-1"], [], "Visible action", 1m, 1m);
+            var fact = new VisualFact(
+                "fact", "scene-1", "She pockets a key.", 1m, 1m, false,
+                TimeSpan.Zero, null, ["frame-1"]);
+
+            var result = await coordinator.DraftAsync(
+                Guid.NewGuid(), root, [new(opportunity, [fact], [], [])], TestContext.Current.CancellationToken);
+
+            Assert.Equal("She pockets a key.", Assert.Single(result).Text);
+            Assert.Equal(1, runtime.GenerationCount);
+            Assert.True(File.Exists(Path.Combine(
+                root,
+                "ad",
+                "drafts",
+                "rejected",
+                "ad-recover-attempt-01.json")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task OverlongDetailIsCompactedToAnIntactEvidenceGroundedSentence()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"adfi-draft-compact-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            const string response = "{\"text\":\"She pockets a key. The room contains many decorative objects that do not affect the action.\",\"evidenceIds\":[\"frame-1\"],\"uncertainty\":null,\"reason\":\"Visible action\"}";
+            var runtime = new QueueRuntime(response);
+            var coordinator = new AdDraftCoordinator(
+                runtime,
+                "qwen-test",
+                Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_AD_WRITER_SYSTEM.md"));
+            var opportunity = new ProposedAdInterval(
+                "compact", "scene-1", new(TimeSpan.Zero, TimeSpan.FromSeconds(2.5)), 2_500,
+                ["frame-1"], [], "Visible action", 1m, 1m);
+            var fact = new VisualFact(
+                "fact", "scene-1", "She pockets a key.", 1m, 1m, false,
+                TimeSpan.Zero, null, ["frame-1"]);
+
+            var result = await coordinator.DraftAsync(
+                Guid.NewGuid(), root, [new(opportunity, [fact], [], [])], TestContext.Current.CancellationToken);
+
+            Assert.Equal("She pockets a key.", Assert.Single(result).Text);
+            Assert.Equal(1, runtime.GenerationCount);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ResumeCanReplaceAnOpenablePersistedDraftWhenCompactingOnWindows()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"adfi-draft-resume-compact-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            const string concise = "She pockets a key.";
+            var opportunity = new ProposedAdInterval(
+                "resume-compact", "scene-1", new(TimeSpan.Zero, TimeSpan.FromSeconds(2.5)), 2_500,
+                ["frame-1"], [], "Visible action", 1m, 1m);
+            var package = new AdDraftPackage(
+                opportunity,
+                [new("fact", "scene-1", concise, 1m, 1m, false, TimeSpan.Zero, null, ["frame-1"])],
+                [],
+                []);
+            var prompt = Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_AD_WRITER_SYSTEM.md");
+            _ = await new AdDraftCoordinator(
+                    new QueueRuntime($"{{\"text\":\"{concise}\",\"evidenceIds\":[\"frame-1\"],\"uncertainty\":null,\"reason\":\"Visible action\"}}"),
+                    "qwen-test",
+                    prompt)
+                .DraftAsync(Guid.NewGuid(), root, [package], TestContext.Current.CancellationToken);
+
+            var draftPath = Path.Combine(root, "ad", "drafts", "ad-resume-compact.json");
+            var persisted = await File.ReadAllTextAsync(draftPath, TestContext.Current.CancellationToken);
+            persisted = persisted.Replace(
+                concise,
+                concise + " Decorative background details continue far beyond the available narration window.",
+                StringComparison.Ordinal);
+            await File.WriteAllTextAsync(draftPath, persisted, TestContext.Current.CancellationToken);
+            File.Delete(Path.Combine(root, "manifests", "ad-draft-complete.json"));
+
+            var resumedRuntime = new QueueRuntime();
+            var resumed = await new AdDraftCoordinator(resumedRuntime, "qwen-test", prompt).DraftAsync(
+                Guid.NewGuid(), root, [package], TestContext.Current.CancellationToken);
+
+            Assert.Equal(concise, Assert.Single(resumed).Text);
+            Assert.Equal(0, resumedRuntime.GenerationCount);
+            Assert.DoesNotContain(
+                Directory.EnumerateFiles(Path.Combine(root, "ad", "drafts")),
+                path => path.EndsWith(".partial", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

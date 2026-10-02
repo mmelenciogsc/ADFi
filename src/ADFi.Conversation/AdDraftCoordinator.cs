@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ADFi.Core;
 using ADFi.LocalAI;
 using ADFi.Media;
@@ -28,7 +29,7 @@ public sealed class AdDraftCoordinator(
 {
     private const string OutputSchema =
         """
-        {"type":"object","required":["text","evidenceIds","uncertainty","reason"],"properties":{"text":{"type":"string"},"evidenceIds":{"type":"array","minItems":1,"items":{"type":"string"}},"uncertainty":{"type":["string","null"]},"reason":{"type":"string"}},"additionalProperties":false}
+        {"type":"object","required":["text","evidenceIds","uncertainty","reason"],"properties":{"text":{"type":"string","maxLength":500},"evidenceIds":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"string","maxLength":100}},"uncertainty":{"type":["string","null"],"maxLength":500},"reason":{"type":"string","maxLength":500}},"additionalProperties":false}
         """;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -72,7 +73,12 @@ public sealed class AdDraftCoordinator(
                     modelLoaded = true;
                 }
 
-                var draft = await GenerateFittingDraftAsync(projectId, package, prompt, cancellationToken)
+                var draft = await GenerateFittingDraftAsync(
+                        projectId,
+                        projectDirectory,
+                        package,
+                        prompt,
+                        cancellationToken)
                     .ConfigureAwait(false);
                 var segment = ValidateAndCreate(package, draft, prompt);
                 await PersistAsync(projectDirectory, segment, cancellationToken).ConfigureAwait(false);
@@ -94,12 +100,14 @@ public sealed class AdDraftCoordinator(
 
     private async Task<AdDraftResponse> GenerateFittingDraftAsync(
         Guid projectId,
+        string projectDirectory,
         AdDraftPackage package,
         PromptResource prompt,
         CancellationToken cancellationToken)
     {
         AdDraftResponse? shortest = null;
         string? shortestModel = null;
+        Exception? validationFailure = null;
         var usable = package.Opportunity.Window.Duration - TimeSpan.FromMilliseconds(250);
         for (var attempt = 1; attempt <= NarrationTimingPolicy.MaximumAutoFitAttempts; attempt++)
         {
@@ -120,18 +128,54 @@ public sealed class AdDraftCoordinator(
                 maximumWords = maxWords,
                 priorOverlongDraft = shortest?.Text,
                 attempt,
-                instruction = $"Write no more than {maxWords} spoken words. Preserve only the most essential supported action or state. The word limit is mandatory.",
+                instruction = validationFailure is null
+                    ? $"Write no more than {maxWords} spoken words. Preserve only the most essential supported action or state. The word limit is mandatory. Keep the reason concise and return one complete JSON object."
+                    : $"The prior response was malformed or cited unsupported evidence. Return one short, complete JSON object only. Write no more than {maxWords} spoken words, cite only the supplied evidence IDs, and keep the reason under 30 words.",
             });
             var response = await runtime.GenerateAsync(
                 modelName,
-                new(prompt.Content, input, [], OutputSchema, 500),
+                new(
+                    prompt.Content,
+                    input,
+                    [],
+                    OutputSchema,
+                    Math.Clamp((maxWords * 3) + 120, 200, 400)),
                 cancellationToken).ConfigureAwait(false);
-            var candidate = JsonSerializer.Deserialize<AdDraftResponse>(response.Content, JsonOptions)
+            AdDraftResponse candidate;
+            try
+            {
+                candidate = JsonSerializer.Deserialize<AdDraftResponse>(response.Content, JsonOptions)
                             ?? throw new InvalidDataException("The AD writer returned no proposal.");
-            ValidateEvidence(package, candidate);
+                ValidateEvidence(package, candidate);
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidDataException or ArgumentException)
+            {
+                await PersistRejectedOutputAsync(
+                    projectDirectory,
+                    package.Opportunity.IntervalId,
+                    attempt,
+                    response,
+                    exception,
+                    cancellationToken).ConfigureAwait(false);
+                if (!TryRecoverCompleteCoreFields(response, package, out candidate))
+                {
+                    validationFailure = exception;
+                    continue;
+                }
+            }
+
             if (NarrationTimingPolicy.EstimateSpeechDuration(candidate.Text) <= usable)
             {
                 return candidate with { Model = response.Model };
+            }
+
+            // Small local models sometimes ignore an otherwise valid word limit by appending
+            // decorative detail. Prefer an intact leading sentence or clause copied verbatim
+            // from the evidence-valid response; never cut through a word or synthesize facts.
+            var compacted = CompactToCompleteUnit(candidate.Text, maxWords);
+            if (compacted is not null)
+            {
+                return candidate with { Text = compacted, Model = response.Model };
             }
 
             if (shortest is null || CountWords(candidate.Text) < CountWords(shortest.Text))
@@ -144,14 +188,129 @@ public sealed class AdDraftCoordinator(
         // The measured Piper phase owns the final timing decision and flags an unresolved
         // overrun for user review. Keep the shortest evidence-valid proposal after the
         // bounded retries instead of aborting the entire resumable project.
-        return (shortest ?? throw new InvalidOperationException("AD_DRAFT_GENERATION_FAILED")) with
+        return (shortest ?? throw new InvalidDataException(
+            "The AD writer returned malformed or unsupported structured output after bounded retries.",
+            validationFailure)) with
         {
             Model = shortestModel,
         };
     }
 
+    private static bool TryRecoverCompleteCoreFields(
+        LocalModelResponse response,
+        AdDraftPackage package,
+        out AdDraftResponse candidate)
+    {
+        candidate = null!;
+        try
+        {
+            // A constrained local model can exhaust its token cap while writing an auxiliary
+            // reason after already returning complete text and evidence fields. Recover only
+            // those fully closed JSON values, then run the normal evidence validation. Never
+            // guess at a cut-off narration string or evidence identifier.
+            var textMatch = Regex.Match(
+                response.Content,
+                "\\\"text\\\"\\s*:\\s*(?<value>\\\"(?:\\\\.|[^\\\"\\\\])*\\\")",
+                RegexOptions.CultureInvariant);
+            var evidenceMatch = Regex.Match(
+                response.Content,
+                "\\\"evidenceIds\\\"\\s*:\\s*(?<value>\\[(?:\\s*\\\"(?:\\\\.|[^\\\"\\\\])*\\\"\\s*,?)*\\s*\\])",
+                RegexOptions.CultureInvariant | RegexOptions.Singleline);
+            if (!textMatch.Success || !evidenceMatch.Success)
+            {
+                return false;
+            }
+
+            var text = JsonSerializer.Deserialize<string>(textMatch.Groups["value"].Value, JsonOptions);
+            var evidenceIds = JsonSerializer.Deserialize<IReadOnlyList<string>>(
+                evidenceMatch.Groups["value"].Value,
+                JsonOptions);
+            candidate = new(
+                text ?? string.Empty,
+                evidenceIds ?? [],
+                "The model response ended after its complete core fields; auxiliary fields were discarded.",
+                "Recovered complete evidence-grounded core fields from a truncated structured response.",
+                response.Model);
+            ValidateEvidence(package, candidate);
+            return true;
+        }
+        catch (Exception error) when (error is JsonException or InvalidDataException or ArgumentException)
+        {
+            candidate = null!;
+            return false;
+        }
+    }
+
+    private static Task PersistRejectedOutputAsync(
+        string projectDirectory,
+        string intervalId,
+        int attempt,
+        LocalModelResponse response,
+        Exception exception,
+        CancellationToken cancellationToken) =>
+        WriteJsonAsync(
+            Path.Combine(
+                Path.GetFullPath(projectDirectory),
+                "ad",
+                "drafts",
+                "rejected",
+                $"ad-{intervalId}-attempt-{attempt:D2}.json"),
+            new
+            {
+                intervalId,
+                attempt,
+                response.Model,
+                response.Content,
+                parseError = exception.Message,
+                createdAtUtc = DateTimeOffset.UtcNow,
+            },
+            cancellationToken);
+
     private static int CountWords(string text) =>
         text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+
+    private static string? CompactToCompleteUnit(string text, int maximumWords)
+    {
+        var normalized = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (CountWords(normalized) <= maximumWords)
+        {
+            return normalized;
+        }
+
+        foreach (var marker in new[] { '.', '!', '?', ';' })
+        {
+            var end = normalized.IndexOf(marker, StringComparison.Ordinal);
+            if (end > 0)
+            {
+                var complete = normalized[..(end + 1)].Trim();
+                if (CountWords(complete) <= maximumWords)
+                {
+                    return complete;
+                }
+            }
+        }
+
+        string? clause = null;
+        for (var index = 0; index < normalized.Length; index++)
+        {
+            if (normalized[index] != ',')
+            {
+                continue;
+            }
+
+            var candidate = normalized[..index].TrimEnd() + ".";
+            if (CountWords(candidate) <= maximumWords)
+            {
+                clause = candidate;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return clause;
+    }
 
     private static AdSegment ValidateAndCreate(
         AdDraftPackage package,
@@ -217,11 +376,17 @@ public sealed class AdDraftCoordinator(
 
         try
         {
-            await using var stream = File.OpenRead(path);
-            var segment = await JsonSerializer.DeserializeAsync<AdSegment>(
-                stream,
-                JsonOptions,
-                cancellationToken).ConfigureAwait(false);
+            AdSegment? segment;
+            await using (var stream = File.OpenRead(path))
+            {
+                segment = await JsonSerializer.DeserializeAsync<AdSegment>(
+                    stream,
+                    JsonOptions,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            // The stream must be closed before a compacted draft replaces the same file.
+            // Windows denies overwrite/rename while the source handle remains open.
             if (segment is null
                 || segment.SegmentId != $"ad-{package.Opportunity.IntervalId}"
                 || segment.SceneId != package.Opportunity.SceneId
@@ -229,9 +394,7 @@ public sealed class AdDraftCoordinator(
                 || segment.PromptId != prompt.Id
                 || segment.PromptVersion != prompt.Version.ToString()
                 || segment.PromptSha256 != prompt.Sha256
-                || segment.InputFingerprint != BuildInputFingerprint(package)
-                || NarrationTimingPolicy.EstimateSpeechDuration(segment.Text)
-                   > package.Opportunity.Window.Duration - TimeSpan.FromMilliseconds(250))
+                || segment.InputFingerprint != BuildInputFingerprint(package))
             {
                 return null;
             }
@@ -241,6 +404,22 @@ public sealed class AdDraftCoordinator(
                 package,
                 new(segment.Text, segment.EvidenceIds, null, "Persisted verified draft"),
                 prompt);
+            var usable = package.Opportunity.Window.Duration - TimeSpan.FromMilliseconds(250);
+            if (NarrationTimingPolicy.EstimateSpeechDuration(segment.Text) > usable)
+            {
+                var maximumWords = Math.Max(
+                    1,
+                    (int)Math.Floor(usable.TotalMinutes * NarrationTimingPolicy.DefaultPlanningWordsPerMinute));
+                var compacted = CompactToCompleteUnit(segment.Text, maximumWords);
+                if (compacted is null)
+                {
+                    return null;
+                }
+
+                segment = segment with { Text = compacted };
+                await PersistAsync(projectDirectory, segment, cancellationToken).ConfigureAwait(false);
+            }
+
             return segment with
             {
                 NarrationAssetRelativePath = null,
@@ -291,14 +470,21 @@ public sealed class AdDraftCoordinator(
     private static async Task WriteJsonAsync<T>(string path, T value, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temporary = path + ".partial";
-        await using (var stream = File.Create(temporary))
+        var temporary = path + $".{Guid.NewGuid():N}.partial";
+        try
         {
-            await JsonSerializer.SerializeAsync(stream, value, JsonOptions, cancellationToken).ConfigureAwait(false);
-            await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-        }
+            await using (var stream = File.Create(temporary))
+            {
+                await JsonSerializer.SerializeAsync(stream, value, JsonOptions, cancellationToken).ConfigureAwait(false);
+                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
 
-        File.Move(temporary, path, overwrite: true);
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            File.Delete(temporary);
+        }
     }
 
     private sealed record AdDraftResponse(

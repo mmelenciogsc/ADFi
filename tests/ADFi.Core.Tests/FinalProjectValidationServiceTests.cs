@@ -115,6 +115,21 @@ public sealed class FinalProjectValidationServiceTests
     }
 
     [Fact]
+    public async Task ContentIdenticalFrameEvidenceAcrossScenesUsesTheSegmentsOwnAsset()
+    {
+        using var fixture = await ValidationFixture.CreateAsync(duplicateEvidenceAcrossScenes: true);
+
+        var result = await fixture.CreateService().RunAsync(
+            fixture.ProjectId,
+            fixture.ProjectDirectory,
+            null,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.ReadyForRender);
+        Assert.Empty(result.Manifest.Issues);
+    }
+
+    [Fact]
     public async Task MissingMutationAuditBreaksAppendOnlyHistoryValidation()
     {
         using var fixture = await ValidationFixture.CreateAsync();
@@ -171,7 +186,8 @@ public sealed class FinalProjectValidationServiceTests
 
         public static async Task<ValidationFixture> CreateAsync(
             SourceAudioKind? collision = null,
-            bool silentNarration = false)
+            bool silentNarration = false,
+            bool duplicateEvidenceAcrossScenes = false)
         {
             var root = Path.Combine(Path.GetTempPath(), "ADFi.ValidationTests", Guid.NewGuid().ToString("N"));
             var projectId = Guid.NewGuid();
@@ -226,9 +242,32 @@ public sealed class FinalProjectValidationServiceTests
             var framePath = Path.Combine(projectDirectory, "visual", "frame-1.jpg");
             Directory.CreateDirectory(Path.GetDirectoryName(framePath)!);
             await File.WriteAllBytesAsync(framePath, [0xFF, 0xD8, 0xFF, 0xD9], TestContext.Current.CancellationToken);
+            var scenes = new List<VisualScene>
+            {
+                new("scene-1", new(TimeSpan.Zero, duration), [frame], [], ["quiet-1"]),
+            };
+            if (duplicateEvidenceAcrossScenes)
+            {
+                var duplicatePath = Path.Combine(projectDirectory, "visual", "frame-duplicate.jpg");
+                await File.WriteAllBytesAsync(
+                    duplicatePath,
+                    [0xFF, 0xD8, 0xFF, 0xD9],
+                    TestContext.Current.CancellationToken);
+                scenes.Add(new(
+                    "scene-2",
+                    new(TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(4)),
+                    [frame with
+                    {
+                        SourceTime = TimeSpan.FromSeconds(3),
+                        RelativeImagePath = "visual/frame-duplicate.jpg",
+                    }],
+                    [],
+                    []));
+            }
+
             var visual = new VisualIndexManifest(
                 projectId, sourceHash, TimeSpan.FromSeconds(1), 640, 3,
-                [new("scene-1", new(TimeSpan.Zero, duration), [frame], [], ["quiet-1"])],
+                scenes,
                 DateTimeOffset.UnixEpoch);
             var provenance = new PromptDecisionProvenance(
                 "ADFI_VISUAL_ANALYST_SYSTEM", "1.0.0", new string('C', 64), "test", "qwen-test", DateTimeOffset.UnixEpoch);

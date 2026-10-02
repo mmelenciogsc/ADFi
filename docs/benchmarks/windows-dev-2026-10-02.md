@@ -40,7 +40,7 @@ The downloaded Piper assets were hashed after installation:
 | `en_US-sam-medium.onnx.json` | `8c7fb47f19683b0b81037c5564f9a5ad4699a9da685e0e5da0a72fd3c3f5c1c4` |
 
 This smoke evidence does not replace the required 5-, 15-, and 60-minute 1080p end-to-end matrix,
-JAWS/NVDA acceptance testing, per-voice listening review, or full source-to-final render validation.
+JAWS/NVDA acceptance testing or per-voice listening review.
 
 ## Licensed three-minute end-to-end diagnostics
 
@@ -57,3 +57,28 @@ meaningful source sound were protected, so both correctly produced zero AD cues.
 pipeline fails conservatively rather than forcing narration, but it is not a narration-quality demo.
 Inputs, commands, measurements, output paths, hashes and limitations are in
 [Licensed real-media diagnostics](../REAL-MEDIA-DIAGNOSTICS.md).
+
+## Full complementary-source diagnostics
+
+Three complete ten-to-thirteen-minute works then exercised the same production Phases 0–12 across
+the three source-audio conditions needed by the walkthrough:
+
+| Source condition | Duration | Transcript segments | Scenes | AD segments | Final size |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Dialogue, music and effects — *Cosmos Laundromat* | 12:10.56 | 81 | 55 | 3 | 532,302,993 bytes |
+| Music and effects, no intelligible dialogue — *Big Buck Bunny* | 10:34.62 | 5 | 59 | 4 | 273,449,516 bytes |
+| Fully silent — *A Trip to the Moon* | 12:41.52 | 27 silence chunks | 52 | 51 | 39,541,738 bytes |
+
+All three original hashes remained unchanged. All three final MP4 hashes match their finalization
+manifests, and complete FFmpeg decode checks succeeded. These runs were intentionally resumable and
+included defect-fix restarts, so the latest per-stage durations contain checkpoint restore time and
+must not be presented as cold performance benchmarks. The diagnostic reports retain every measured
+attempt under `D:\ADFi-DemoRuns\Projects`.
+
+The results do not by themselves establish narration editorial quality. Cosmos completed without a
+warning override; Big Buck Bunny retained one possible-click warning outside the selected demo
+excerpt; and the silent film retained low-confidence, duplicate-description and possible-click
+warnings that require a complete human pass before publication. Exact output paths, hashes and the
+corrected implementation behavior are documented in
+[Licensed real-media diagnostics](../REAL-MEDIA-DIAGNOSTICS.md). Walkthrough excerpts and stills are
+indexed separately at `D:\ADFi-DemoAssets\asset-manifest.json`.

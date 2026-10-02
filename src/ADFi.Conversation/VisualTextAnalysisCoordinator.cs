@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using ADFi.Core;
 using ADFi.LocalAI;
 using ADFi.Media;
@@ -20,7 +22,9 @@ public sealed record VisualTextSceneResult(
     string SceneId,
     IReadOnlyList<VisualTextCandidate> VlmCandidates,
     IReadOnlyList<ReconciledOcr> ReconciledReadings,
-    PromptDecisionProvenance Provenance);
+    PromptDecisionProvenance Provenance,
+    string? InputFingerprint = null,
+    string? Uncertainty = null);
 
 public sealed record VisualTextAnalysisManifest(
     Guid ProjectId,
@@ -70,10 +74,15 @@ public sealed class VisualTextAnalysisCoordinator(
         var candidateScenes = visualIndex.Scenes
             .Where(scene => scene.Keyframes.Any(frame => frame.PotentialText))
             .ToArray();
-        var drafts = new List<(VisualScene Scene, VisualTextDraft Draft, PromptDecisionProvenance Provenance)>();
+        var drafts = new List<(
+            VisualScene Scene,
+            VisualTextDraft Draft,
+            PromptDecisionProvenance Provenance,
+            string InputFingerprint,
+            string? Uncertainty)>();
         if (candidateScenes.Length > 0)
         {
-            await runtime.EnsureModelAvailableAsync(modelName, cancellationToken).ConfigureAwait(false);
+            var modelLoaded = false;
             try
             {
                 for (var index = 0; index < candidateScenes.Length; index++)
@@ -81,38 +90,53 @@ public sealed class VisualTextAnalysisCoordinator(
                     cancellationToken.ThrowIfCancellationRequested();
                     var scene = candidateScenes[index];
                     var frames = scene.Keyframes.Where(frame => frame.PotentialText).ToArray();
-                    var response = await runtime.GenerateAsync(
-                        modelName,
-                        new(
-                            prompt.Content,
-                            JsonSerializer.Serialize(new
-                            {
-                                projectId,
-                                scene.SceneId,
-                                frames = frames.Select(frame => new
-                                {
-                                    frame.EvidenceId,
-                                    timestampMilliseconds = (long)frame.SourceTime.TotalMilliseconds,
-                                    frame.Width,
-                                    frame.Height,
-                                }),
-                                instruction = "Locate only potentially meaningful visible text. Give a conservative contextual reading and a normalized crop rectangle. Do not invent obscured characters.",
-                            }),
-                            frames.Select(frame => AbsoluteFrame(projectDirectory, frame)).ToArray(),
-                            OutputSchema,
-                            900),
+                    var fingerprint = ComputeInputFingerprint(scene);
+                    var existing = await TryLoadLocatorAsync(
+                        projectDirectory,
+                        scene,
+                        prompt,
+                        fingerprint,
                         cancellationToken).ConfigureAwait(false);
-                    var draft = JsonSerializer.Deserialize<VisualTextDraft>(response.Content, JsonOptions)
-                                ?? throw new InvalidDataException("The visual-text model returned no result.");
-                    draft = NormalizeCropRegions(draft);
-                    ValidateDraft(scene, draft);
-                    drafts.Add((scene, draft, new(
+                    if (existing is not null)
+                    {
+                        drafts.Add((
+                            scene,
+                            new(scene.SceneId, existing.VlmCandidates),
+                            existing.Provenance,
+                            fingerprint,
+                            existing.Uncertainty));
+                        progress?.Report((
+                            index + 1,
+                            candidateScenes.Length,
+                            $"Restored verified visual-text location {index + 1} of {candidateScenes.Length}."));
+                        continue;
+                    }
+
+                    if (!modelLoaded)
+                    {
+                        await runtime.EnsureModelAvailableAsync(modelName, cancellationToken).ConfigureAwait(false);
+                        modelLoaded = true;
+                    }
+
+                    var (draft, response, uncertainty) = await GenerateDraftAsync(
+                        projectId,
+                        scene,
+                        frames,
+                        prompt,
+                        projectDirectory,
+                        cancellationToken).ConfigureAwait(false);
+                    var provenance = new PromptDecisionProvenance(
                         prompt.Id,
                         prompt.Version.ToString(),
                         prompt.Sha256,
                         runtime.RuntimeName,
                         response.Model,
-                        timeProvider.GetUtcNow())));
+                        timeProvider.GetUtcNow());
+                    await PersistLocatorAsync(
+                        projectDirectory,
+                        new(scene.SceneId, draft.Candidates, provenance, fingerprint, uncertainty),
+                        cancellationToken).ConfigureAwait(false);
+                    drafts.Add((scene, draft, provenance, fingerprint, uncertainty));
                     progress?.Report((
                         index + 1,
                         candidateScenes.Length,
@@ -121,7 +145,10 @@ public sealed class VisualTextAnalysisCoordinator(
             }
             finally
             {
-                await runtime.UnloadAsync(modelName, CancellationToken.None).ConfigureAwait(false);
+                if (modelLoaded)
+                {
+                    await runtime.UnloadAsync(modelName, CancellationToken.None).ConfigureAwait(false);
+                }
             }
         }
 
@@ -165,7 +192,13 @@ public sealed class VisualTextAnalysisCoordinator(
                 }
             }
 
-            results.Add(new(item.Scene.SceneId, item.Draft.Candidates, readings, item.Provenance));
+            results.Add(new(
+                item.Scene.SceneId,
+                item.Draft.Candidates,
+                readings,
+                item.Provenance,
+                item.InputFingerprint,
+                item.Uncertainty));
             progress?.Report((
                 sceneIndex + 1,
                 drafts.Count,
@@ -186,6 +219,173 @@ public sealed class VisualTextAnalysisCoordinator(
         return manifest;
     }
 
+    private async Task<(VisualTextDraft Draft, LocalModelResponse Response, string? Uncertainty)> GenerateDraftAsync(
+        Guid projectId,
+        VisualScene scene,
+        IReadOnlyList<KeyframeEvidence> frames,
+        PromptResource prompt,
+        string projectDirectory,
+        CancellationToken cancellationToken)
+    {
+        Exception? validationFailure = null;
+        LocalModelResponse? lastResponse = null;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var response = await runtime.GenerateAsync(
+                modelName,
+                new(
+                    prompt.Content,
+                    BuildInput(projectId, scene, frames, isRetry: attempt > 0),
+                    frames.Select(frame => AbsoluteFrame(projectDirectory, frame)).ToArray(),
+                    OutputSchema,
+                    attempt == 0 ? 900 : 700),
+                cancellationToken).ConfigureAwait(false);
+            lastResponse = response;
+            try
+            {
+                var draft = JsonSerializer.Deserialize<VisualTextDraft>(response.Content, JsonOptions)
+                            ?? throw new InvalidDataException("The visual-text model returned no result.");
+                draft = NormalizeCropRegions(draft);
+                ValidateDraft(scene, draft);
+                return (draft, response, null);
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidDataException or ArgumentException)
+            {
+                validationFailure = exception;
+                await PersistRejectedOutputAsync(
+                    projectDirectory,
+                    scene.SceneId,
+                    attempt + 1,
+                    response,
+                    exception,
+                    cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        // A potential-text signal is not itself proof that readable text exists. If both
+        // bounded attempts remain malformed or unsupported, preserve the rejected evidence
+        // for audit and promote no text. Downstream scene analysis still sees PotentialText
+        // on the frame and can request exact verification; fabricated OCR never enters it.
+        return (
+            new(scene.SceneId, []),
+            lastResponse ?? throw new InvalidOperationException("The visual-text runtime returned no response."),
+            $"No text was promoted after bounded validation failed: {validationFailure?.Message}");
+    }
+
+    private static string BuildInput(
+        Guid projectId,
+        VisualScene scene,
+        IReadOnlyList<KeyframeEvidence> frames,
+        bool isRetry) =>
+        JsonSerializer.Serialize(new
+        {
+            projectId,
+            scene.SceneId,
+            frames = frames.Select(frame => new
+            {
+                frame.EvidenceId,
+                timestampMilliseconds = (long)frame.SourceTime.TotalMilliseconds,
+                frame.Width,
+                frame.Height,
+            }),
+            instruction = isRetry
+                ? "The prior structured response was invalid. Return one short, complete JSON object only, with no more than three candidates and no candidate text over 120 characters. Use the exact scene ID and exact frame evidence IDs listed here. Candidate IDs must be nonempty and unique within this scene. For dense credits or name lists, report one concise category or heading instead of transcribing names. Omit uncertain candidates rather than inventing text or evidence."
+                : "Locate only potentially meaningful visible text. Return no more than six candidates and keep every candidate text under 300 characters. For dense credits or name lists, report a concise category or meaningful heading rather than enumerating names. Give a conservative contextual reading and a normalized crop rectangle. Use only the exact scene and frame evidence IDs supplied. Candidate IDs must be nonempty and unique within this scene. Do not invent obscured characters.",
+        });
+
+    private async Task<VisualTextLocatorArtifact?> TryLoadLocatorAsync(
+        string projectDirectory,
+        VisualScene scene,
+        PromptResource prompt,
+        string fingerprint,
+        CancellationToken cancellationToken)
+    {
+        var path = LocatorPath(projectDirectory, scene.SceneId);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            await using var stream = File.OpenRead(path);
+            var existing = await JsonSerializer.DeserializeAsync<VisualTextLocatorArtifact>(
+                stream,
+                JsonOptions,
+                cancellationToken).ConfigureAwait(false);
+            if (existing is null
+                || existing.Provenance.PromptId != prompt.Id
+                || existing.Provenance.PromptVersion != prompt.Version.ToString()
+                || existing.Provenance.PromptSha256 != prompt.Sha256
+                || existing.Provenance.ModelName != modelName
+                || existing.InputFingerprint != fingerprint)
+            {
+                return null;
+            }
+
+            ValidateDraft(scene, new(existing.SceneId, existing.VlmCandidates));
+            return existing;
+        }
+        catch (Exception exception) when (exception is JsonException or IOException or InvalidDataException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private async Task PersistRejectedOutputAsync(
+        string projectDirectory,
+        string sceneId,
+        int attempt,
+        LocalModelResponse response,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(
+            Path.GetFullPath(projectDirectory),
+            "visual",
+            "ocr",
+            "rejected",
+            $"{sceneId}-attempt-{attempt:D2}.json");
+        await WriteAsync(path, new
+        {
+            sceneId,
+            attempt,
+            response.Model,
+            response.Content,
+            parseError = exception.Message,
+            createdAtUtc = timeProvider.GetUtcNow(),
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static Task PersistLocatorAsync(
+        string projectDirectory,
+        VisualTextLocatorArtifact artifact,
+        CancellationToken cancellationToken) =>
+        WriteAsync(LocatorPath(projectDirectory, artifact.SceneId), artifact, cancellationToken);
+
+    private static string LocatorPath(string projectDirectory, string sceneId) =>
+        Path.Combine(Path.GetFullPath(projectDirectory), "visual", "ocr", "locator", $"{sceneId}.json");
+
+    internal static string ComputeInputFingerprint(VisualScene scene)
+    {
+        var canonical = JsonSerializer.Serialize(new
+        {
+            scene.SceneId,
+            scene.SourceInterval,
+            Frames = scene.Keyframes.Where(frame => frame.PotentialText).Select(frame => new
+            {
+                frame.EvidenceId,
+                frame.SourceTime,
+                frame.RelativeImagePath,
+                frame.Width,
+                frame.Height,
+                frame.PotentialText,
+            }),
+            OutputSchema,
+        });
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+    }
+
     private static void ValidateDraft(VisualScene scene, VisualTextDraft draft)
     {
         if (!string.Equals(scene.SceneId, draft.SceneId, StringComparison.Ordinal))
@@ -197,13 +397,30 @@ public sealed class VisualTextAnalysisCoordinator(
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var candidate in draft.Candidates)
         {
-            if (string.IsNullOrWhiteSpace(candidate.CandidateId)
-                || !ids.Add(candidate.CandidateId)
-                || !evidence.Contains(candidate.FrameEvidenceId)
-                || candidate.Confidence is < 0 or > 1
-                || candidate.Meaningful && string.IsNullOrWhiteSpace(candidate.Text))
+            if (string.IsNullOrWhiteSpace(candidate.CandidateId))
             {
-                throw new InvalidDataException("Visual-text analysis contains an unsupported candidate.");
+                throw new InvalidDataException("A visual-text candidate has no identifier.");
+            }
+
+            if (!ids.Add(candidate.CandidateId))
+            {
+                throw new InvalidDataException("Visual-text candidate identifiers must be unique within a scene.");
+            }
+
+            if (string.IsNullOrWhiteSpace(candidate.FrameEvidenceId)
+                || !evidence.Contains(candidate.FrameEvidenceId))
+            {
+                throw new InvalidDataException("A visual-text candidate cites unavailable frame evidence.");
+            }
+
+            if (candidate.Confidence is < 0 or > 1)
+            {
+                throw new InvalidDataException("Visual-text confidence must be between zero and one.");
+            }
+
+            if (candidate.Meaningful && string.IsNullOrWhiteSpace(candidate.Text))
+            {
+                throw new InvalidDataException("A meaningful visual-text candidate has no supported reading.");
             }
 
             if (candidate.Region is { } region
@@ -262,9 +479,9 @@ public sealed class VisualTextAnalysisCoordinator(
             : throw new FileNotFoundException("A visual-text evidence frame is missing.", path);
     }
 
-    private static async Task WriteAsync(
+    private static async Task WriteAsync<T>(
         string path,
-        VisualTextAnalysisManifest value,
+        T value,
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -279,4 +496,11 @@ public sealed class VisualTextAnalysisCoordinator(
     }
 
     private sealed record VisualTextDraft(string SceneId, IReadOnlyList<VisualTextCandidate> Candidates);
+
+    private sealed record VisualTextLocatorArtifact(
+        string SceneId,
+        IReadOnlyList<VisualTextCandidate> VlmCandidates,
+        PromptDecisionProvenance Provenance,
+        string InputFingerprint,
+        string? Uncertainty = null);
 }

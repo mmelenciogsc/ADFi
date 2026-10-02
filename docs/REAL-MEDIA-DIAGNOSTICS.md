@@ -38,8 +38,11 @@ dotnet run --project tools\ADFi.Diagnostics\ADFi.Diagnostics.csproj --configurat
 ```
 
 The optional `--approved-review-text` argument is deliberately narrow: it can apply an explicitly
-human-approved replacement only when exactly one generated segment is timing-blocked. It is not an
-automatic bypass and cannot overwrite reviewed project state.
+human-approved replacement only when exactly one generated segment is timing-blocked. For a larger
+full-film review, `--approved-review-file` accepts a versioned JSON list containing exactly one
+explicitly reviewed replacement for every timing-blocked segment. Both paths synthesize and measure
+the replacements, append one audited project mutation and refuse stale or changed reviewed state;
+neither is an automatic validation bypass.
 
 ## Results
 
@@ -132,5 +135,38 @@ dialogue and meaningful source sound. Big Buck Bunny tests preservation of a non
 bed. The public-domain silent film tests unrestricted narration timing plus ensemble staging,
 period imagery, practical effects, transitions and uncertain low-resolution evidence. Exact URLs,
 attribution, license evidence, hashes, share-alike obligations, thematic notes and limitations are
-recorded beside the media in `D:\ADFi-TestMedia\ADFi-ready-candidates\README.md`. Full Phases 0–12
-runs remain the next step.
+recorded beside the media in `D:\ADFi-TestMedia\ADFi-ready-candidates\README.md`.
+
+## Full three-source Phases 0–12 results
+
+All three complete sources subsequently ran through the production workflow on the Windows 11
+development machine. Every source retained its intake SHA-256. Every final MP4 passed a complete
+FFmpeg decode, matched the SHA-256 in its finalization manifest, and contains H.264 video plus the
+new AAC stereo mix.
+
+| Case | Scenes | AD segments | Final MP4 | Final SHA-256 |
+| --- | ---: | ---: | --- | --- |
+| Dialogue: *Cosmos Laundromat* | 55 | 3 | `D:\ADFi-DemoRuns\Projects\18f09f03-ebec-74f0-6a3d-6b68e74de10c\final\v00000003-54ae7549bbc3-with-narration\03_Cosmos_Laundromat_Dialogue_CC-BY-SA-4.0-ADFi.mp4` | `8a5b9f239797d6090873f244cd84a0487ec1a3c3c992f8fda45d66c0bbcbf08e` |
+| Music/effects without dialogue: *Big Buck Bunny* | 59 | 4 | `D:\ADFi-DemoRuns\Projects\035a0e3e-6edc-3e96-9725-8bf80043b56e\final\v00000003-24a1439eaa5e-with-narration\01_Big_Buck_Bunny_YouTube_CC-BY-3.0-ADFi.mp4` | `dc459b04d63a1c526fb6d7e082282f6397806ca5d9af54158721eefd82583ea1` |
+| Fully silent: *A Trip to the Moon* | 52 | 51 | `D:\ADFi-DemoRuns\Projects\53c9122c-fc3a-30a5-0d70-2e7776b437b4\final\v00000003-123e30da4765-with-narration\02_A_Trip_to_the_Moon_Public_Domain-ADFi.mp4` | `8a067ac3e9d9f5cbc188348e82cb21de0504724bab0bedc14803ef77c1486a80` |
+
+The run exposed and corrected additional general defects: Phase 4 now persists and fingerprints its
+per-scene text-locator result and falls back conservatively after bounded malformed-output retries;
+final validation resolves a frame hash within its owning scene rather than assuming the same image
+hash cannot recur in another scene; full-film timing review accepts an exact, versioned set of
+explicitly reviewed replacements; AD drafting retains malformed private output for diagnosis,
+recovers only complete evidence-validated core fields when a constrained model truncates an
+auxiliary field, compacts only intact source sentences/clauses, and closes an existing Windows file
+handle before replacing a resumed compacted draft.
+
+The full outputs are diagnostic evidence, not automatically approved public masters. Cosmos needed
+no warning override. Big Buck Bunny retains one possible narration-click warning outside the chosen
+walkthrough excerpt. The silent-film run deliberately records six low-confidence visual-state
+warnings, one likely duplicate-description warning and one possible-click warning; its complete AD
+script therefore needs human editorial review before publication. The diagnostic runner records
+each explicit review or warning override in the append-only mutation history rather than hiding it.
+
+Walkthrough-ready paired excerpts, nine native-resolution stills, contact sheets, alt text, hashes
+and license/provenance metadata are stored outside Git at `D:\ADFi-DemoAssets`. The canonical index
+is `D:\ADFi-DemoAssets\asset-manifest.json`; `D:\ADFi-DemoAssets\README.md` gives the recommended
+three-case walkthrough sequence and required attribution.

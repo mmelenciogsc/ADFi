@@ -207,12 +207,20 @@ public sealed class CreatorVisualUnderstandingWorkflow(
                     Path.Combine(root, relative), cancellationToken).ConfigureAwait(false);
                 var prompt = await PromptResourceLoader.LoadAsync(
                     configuration.VisualTextPromptPath, cancellationToken).ConfigureAwait(false);
-                var expectedSceneCount = visual.Scenes.Count(scene => scene.Keyframes.Any(frame => frame.PotentialText));
+                var expected = visual.Scenes
+                    .Where(scene => scene.Keyframes.Any(frame => frame.PotentialText))
+                    .ToDictionary(
+                        scene => scene.SceneId,
+                        VisualTextAnalysisCoordinator.ComputeInputFingerprint,
+                        StringComparer.Ordinal);
                 return manifest.ProjectId == source.Checkpoint.ProjectId
                        && string.Equals(manifest.SourceSha256, source.Source.SourceSha256, StringComparison.OrdinalIgnoreCase)
-                       && manifest.Scenes.Count == expectedSceneCount
+                       && manifest.Scenes.Count == expected.Count
                        && manifest.PromptSha256 == prompt.Sha256
-                       && manifest.ModelName == configuration.QwenModel;
+                       && manifest.ModelName == configuration.QwenModel
+                       && manifest.Scenes.All(scene =>
+                           expected.TryGetValue(scene.SceneId, out var fingerprint)
+                           && scene.InputFingerprint == fingerprint);
             }
             catch (Exception exception) when (exception is JsonException or IOException or InvalidDataException)
             {
