@@ -7,6 +7,35 @@ public sealed class ProjectMutationService(
     IProjectVersionStore store,
     TimeProvider timeProvider)
 {
+    public Task<ProjectSnapshot> AddAdSegmentAsync(
+        Guid projectId,
+        int expectedVersion,
+        AdSegment proposedSegment,
+        ISet<string> availableEvidenceIds,
+        ISet<string> availableNarrationAssets,
+        string reason,
+        CancellationToken cancellationToken) =>
+        ApplyAsync(
+            projectId,
+            expectedVersion,
+            ProjectMutationKind.AddAdSegment,
+            reason,
+            current =>
+            {
+                if (current.AdSegments.Any(segment => segment.SegmentId == proposedSegment.SegmentId))
+                {
+                    throw new InvalidOperationException("VALIDATION_FAILED: the new description ID already exists.");
+                }
+
+                var segments = current.AdSegments
+                    .Append(proposedSegment)
+                    .OrderBy(segment => segment.Window.Start)
+                    .ToArray();
+                EnsureValid(current.MediaDuration, segments, availableEvidenceIds, availableNarrationAssets);
+                return current with { AdSegments = segments };
+            },
+            cancellationToken);
+
     public Task<ProjectSnapshot> ReplaceAdSegmentAsync(
         Guid projectId,
         int expectedVersion,

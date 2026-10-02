@@ -106,4 +106,42 @@ public sealed class ProjectMutationTests
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task NewNarratedSegmentIsValidatedAndAppendedWithoutReplacingExistingWork()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"adfi-versions-{Guid.NewGuid():N}");
+        var projectId = Guid.NewGuid();
+        var existing = new AdSegment(
+            "ad-1", "scene-1", new(TimeSpan.Zero, TimeSpan.FromSeconds(2)), "First.",
+            ["frame-1"], "writer", "1", new string('A', 64), "narration/one.wav",
+            TimeSpan.FromMilliseconds(400), false);
+        var added = new AdSegment(
+            "ad-2", "scene-2", new(TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(5)), "Second.",
+            ["frame-2"], "writer", "1", new string('B', 64), "narration/two.wav",
+            TimeSpan.FromMilliseconds(400), true);
+        try
+        {
+            var store = new FileProjectVersionStore(root);
+            await store.InitializeAsync(
+                new(projectId, 1, new string('C', 64), TimeSpan.FromMinutes(1), [existing], "voice-1", DateTimeOffset.UnixEpoch, null),
+                TestContext.Current.CancellationToken);
+
+            var changed = await new ProjectMutationService(store, TimeProvider.System).AddAdSegmentAsync(
+                projectId,
+                1,
+                added,
+                new HashSet<string>(["frame-1", "frame-2"], StringComparer.Ordinal),
+                new HashSet<string>(["narration/one.wav", "narration/two.wav"], StringComparer.Ordinal),
+                "Add verified missing action.",
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(2, changed.Version);
+            Assert.Equal(["ad-1", "ad-2"], changed.AdSegments.Select(item => item.SegmentId));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
 }

@@ -56,6 +56,10 @@ public sealed class RepositoryArchitectureTests
             "ConversationTextBox",
             "SubmitConversationButton",
             "UndoLastChangeButton",
+            "RunFinalValidationButton",
+            "FinalValidationIssuesList",
+            "OverrideSelectedWarningButton",
+            "FinalValidationStatusText",
             "RefreshDiscoverButton",
             "DiscoverProjects",
             "OpenDiscoverProjectButton",
@@ -83,7 +87,7 @@ public sealed class RepositoryArchitectureTests
             .Where(value => value is not null)
             .Select(value => int.Parse(value!, System.Globalization.CultureInfo.InvariantCulture))
             .ToArray();
-        Assert.Equal(Enumerable.Range(1, 40), tabIndices.Order());
+        Assert.Equal(Enumerable.Range(1, 43), tabIndices.Order());
     }
 
     [Fact]

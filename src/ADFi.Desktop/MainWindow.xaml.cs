@@ -38,6 +38,8 @@ public partial class MainWindow : Window, IDisposable
     private CancellationTokenSource? currentOperationCancellation;
     private System.Windows.Media.MediaPlayer? narrationVoicePreviewPlayer;
     private ProjectSnapshot? openedProjectSnapshot;
+    private int? finalValidationSnapshotVersion;
+    private readonly HashSet<string> finalValidationOverrideIds = new(StringComparer.Ordinal);
     private string? loadedDraftPreviewPath;
     private bool playDraftPreviewWhenOpened;
     private bool disposed;
@@ -370,6 +372,7 @@ public partial class MainWindow : Window, IDisposable
                 .LoadCurrentAsync(project.ProjectId, lifetimeCancellation.Token);
             PresentProjectSnapshot(snapshot);
             await LoadConversationHistoryAsync(project.ProjectDirectory, lifetimeCancellation.Token);
+            await LoadFinalValidationStateAsync(project.ProjectDirectory, snapshot, lifetimeCancellation.Token);
             Announce(snapshot.AdSegments.Count == 0
                 ? $"{project.SourceFileName} opened at {project.LatestPhase}. No draft descriptions exist yet."
                 : $"{project.SourceFileName} opened with {snapshot.AdSegments.Count} audio description segments.");
@@ -920,14 +923,101 @@ public partial class MainWindow : Window, IDisposable
     private async void UndoLastChangeButton_OnClick(object sender, RoutedEventArgs e) =>
         await RunCreatorConversationAsync("Undo that");
 
+    private async void RunFinalValidationButton_OnClick(object sender, RoutedEventArgs e) =>
+        await RunFinalValidationAsync();
+
+    private void FinalValidationIssuesList_OnSelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateCreatorAccess();
+
+    private async void OverrideSelectedWarningButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (FinalValidationIssuesList.SelectedItem is not FinalValidationIssueItem selected
+            || !selected.Issue.CanOverride)
+        {
+            Announce("Select a nonblocking final-validation warning first. Blocking issues cannot be overridden.");
+            return;
+        }
+
+        finalValidationOverrideIds.Add(selected.Issue.IssueId);
+        Announce($"Override recorded for {selected.Issue.Code}. Running every final check again.");
+        await RunFinalValidationAsync();
+    }
+
+    private async Task RunFinalValidationAsync()
+    {
+        if (LocalProjectsList.SelectedItem is not LocalProjectSummary project
+            || !entitlementVerified
+            || entitlement?.Plan != SubscriptionPlan.Creator
+            || openedProjectSnapshot is not { AdSegments.Count: > 0 })
+        {
+            Announce("Open a narrated project with a current verified Creator subscription first.");
+            return;
+        }
+
+        if (currentOperationCancellation is not null)
+        {
+            Announce("Wait for the current local operation to finish or cancel it first.");
+            return;
+        }
+
+        currentOperationCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
+        SetLocalOperationState(running: true);
+        PipelineProgressBar.IsIndeterminate = true;
+        FinalValidationStatusText.Text = "Checking the committed project and immutable source.";
+        Announce("Running final project validation.");
+        try
+        {
+            var service = new FinalProjectValidationService(
+                new FileProjectVersionStore(configuration.ProjectRoot),
+                new FilePipelineCheckpointStore(configuration.ProjectRoot),
+                new FfprobeMediaProbe(),
+                TimeProvider.System);
+            var result = await service.RunAsync(
+                project.ProjectId,
+                project.ProjectDirectory,
+                finalValidationOverrideIds,
+                currentOperationCancellation.Token);
+            await LoadLocalProjectsAsync(currentOperationCancellation.Token, project.ProjectId);
+            PresentProjectSnapshot(result.Snapshot);
+            PresentFinalValidation(result.Manifest);
+            PipelineProgressBar.Value = result.ReadyForRender ? 12 : 11;
+            if (result.ReadyForRender)
+            {
+                Announce("Final project validation complete. This committed version is ready for final rendering.");
+            }
+            else
+            {
+                var blockers = result.Manifest.Issues.Count(item => item.Severity == FinalValidationSeverity.Blocking);
+                var warnings = result.Manifest.Issues.Count(item => item.CanOverride && !item.Overridden);
+                Announce($"Final validation stopped rendering. {blockers} blocking issues and {warnings} warnings remain. Review the issue list.");
+                FinalValidationIssuesList.Focus();
+            }
+
+            LogTechnical(
+                $"Project {project.ProjectId:D}: Phase 11 {result.Manifest.State}; " +
+                $"version {result.Manifest.ProjectVersion}, {result.Manifest.Issues.Count} issue(s), " +
+                $"{result.Manifest.NarrationAssets.Count} narration asset(s) audited.");
+        }
+        catch (Exception exception)
+        {
+            ReportError("Final project validation", exception);
+        }
+        finally
+        {
+            PipelineProgressBar.IsIndeterminate = false;
+            currentOperationCancellation.Dispose();
+            currentOperationCancellation = null;
+            SetLocalOperationState(running: false);
+        }
+    }
+
     private async Task RunCreatorConversationAsync(string request)
     {
         if (LocalProjectsList.SelectedItem is not LocalProjectSummary project
             || !entitlementVerified
             || entitlement?.Plan != SubscriptionPlan.Creator
             || openedProjectSnapshot is null
-            || project.LatestPhase < AdficationPhase.PiperNarrationAndTimingValidation
-            || project.LatestStatus != CheckpointStatus.Complete)
+            || openedProjectSnapshot.AdSegments.Count == 0)
         {
             Announce("Open a narrated project with a current verified Creator subscription first.");
             return;
@@ -1430,7 +1520,16 @@ public partial class MainWindow : Window, IDisposable
         ConversationTextBox.IsEnabled = canRunConversation;
         SubmitConversationButton.IsEnabled = canRunConversation
                                              && !string.IsNullOrWhiteSpace(ConversationTextBox.Text);
-        UndoLastChangeButton.IsEnabled = canRunConversation && openedProjectSnapshot!.Version > 2;
+        UndoLastChangeButton.IsEnabled = canRunConversation && openedProjectSnapshot!.Version > 1;
+        var canFinalize = canCreate
+                          && selected
+                          && openedProjectSnapshot is { AdSegments.Count: > 0 }
+                          && !operationRunning;
+        RunFinalValidationButton.IsEnabled = canFinalize;
+        OverrideSelectedWarningButton.IsEnabled = canFinalize
+                                                  && FinalValidationIssuesList.SelectedItem is FinalValidationIssueItem item
+                                                  && item.Issue.CanOverride
+                                                  && !item.Issue.Overridden;
     }
 
     private void SetLocalOperationState(bool running)
@@ -1560,6 +1659,11 @@ public partial class MainWindow : Window, IDisposable
 
     private void PresentProjectSnapshot(ProjectSnapshot snapshot)
     {
+        if (finalValidationSnapshotVersion != snapshot.Version)
+        {
+            ClearFinalValidationState();
+        }
+
         openedProjectSnapshot = snapshot;
         DescriptionsList.ItemsSource = snapshot.AdSegments
             .Select(segment => new ReviewDescriptionItem(
@@ -1567,6 +1671,64 @@ public partial class MainWindow : Window, IDisposable
                 $"{FormatTime(segment.Window.Start)} to {FormatTime(segment.Window.End)}. {segment.Text}"))
             .ToArray();
         UpdateCreatorAccess();
+    }
+
+    private void PresentFinalValidation(FinalProjectValidationManifest manifest)
+    {
+        finalValidationSnapshotVersion = manifest.ProjectVersion;
+        finalValidationOverrideIds.Clear();
+        finalValidationOverrideIds.UnionWith(manifest.AppliedOverrideIssueIds);
+        FinalValidationIssuesList.ItemsSource = manifest.Issues
+            .Select(issue => new FinalValidationIssueItem(
+                issue,
+                $"{issue.Severity}. {issue.Code}. " +
+                (issue.SegmentId is null ? string.Empty : $"Segment {issue.SegmentId}. ") +
+                $"{issue.Message} " +
+                (issue.Overridden ? "Explicitly overridden." : issue.CanOverride ? "Override available." : "Must be fixed.")))
+            .ToArray();
+        FinalValidationStatusText.Text = manifest.State == "READY_FOR_FINAL_RENDER"
+            ? $"Ready for final rendering. Project version {manifest.ProjectVersion}; {manifest.AppliedOverrideIssueIds.Count} explicit warning override(s)."
+            : $"Rendering is blocked for project version {manifest.ProjectVersion}. Select each issue for details and correct all blocking issues.";
+        UpdateCreatorAccess();
+    }
+
+    private async Task LoadFinalValidationStateAsync(
+        string projectDirectory,
+        ProjectSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(projectDirectory, "manifests", "final-project-validation.json");
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            await using var stream = File.OpenRead(path);
+            var manifest = await JsonSerializer.DeserializeAsync<FinalProjectValidationManifest>(
+                stream,
+                ConversationJsonOptions,
+                cancellationToken);
+            if (manifest is not null
+                && manifest.ProjectId == snapshot.ProjectId
+                && manifest.ProjectVersion == snapshot.Version)
+            {
+                PresentFinalValidation(manifest);
+            }
+        }
+        catch (JsonException)
+        {
+            LogTechnical("Ignored one invalid final-validation manifest. Run final validation again.");
+        }
+    }
+
+    private void ClearFinalValidationState()
+    {
+        finalValidationSnapshotVersion = null;
+        finalValidationOverrideIds.Clear();
+        FinalValidationIssuesList.ItemsSource = null;
+        FinalValidationStatusText.Text = "Final validation has not run for this project version.";
     }
 
     private void SelectDescription(string? segmentId)
@@ -1658,6 +1820,7 @@ public partial class MainWindow : Window, IDisposable
         DescriptionsList.ItemsSource = null;
         ConversationHistoryTextBox.Clear();
         ConversationTextBox.Clear();
+        ClearFinalValidationState();
         loadedDraftPreviewPath = null;
         playDraftPreviewWhenOpened = false;
         DraftPreviewPlayer.Stop();
@@ -1684,4 +1847,6 @@ public partial class MainWindow : Window, IDisposable
             && pair.First.InputFingerprint == pair.Second.InputFingerprint);
 
     private sealed record ReviewDescriptionItem(AdSegment Segment, string AccessibleLabel);
+
+    private sealed record FinalValidationIssueItem(FinalValidationIssue Issue, string AccessibleLabel);
 }

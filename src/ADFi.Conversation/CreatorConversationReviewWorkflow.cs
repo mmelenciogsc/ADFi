@@ -47,6 +47,8 @@ public sealed class CreatorConversationReviewWorkflow(
             "IdentifyPeopleObjectsActions",
             "RunVlmOcr",
             "ReconcileOcrResults",
+            "FindDescriptionOpportunity",
+            "DraftAdSegment",
             "RewriteAdSegment",
             "CheckForSpoilers",
             "CheckRedundancy",
@@ -263,6 +265,7 @@ internal sealed class CreatorConversationTaskExecutor : IAtomicTaskExecutor
     private readonly IProgress<CreatorConversationProgress>? progress;
     private readonly int totalTasks;
     private AdSegment? proposedSegment;
+    private ProposedAdInterval? newOpportunity;
     private IReadOnlyList<AdSegment>? preparedSegments;
     private string? preparedVoiceId;
     private bool spoilerChecked;
@@ -329,7 +332,7 @@ internal sealed class CreatorConversationTaskExecutor : IAtomicTaskExecutor
                 return Failure(task, tool, reasoned, "TASK_NOT_SUPPORTED_BY_EVIDENCE", reasoned.Decision.Summary);
             }
 
-            var output = await ExecuteHostToolAsync(tool, reasoned.Decision, cancellationToken).ConfigureAwait(false);
+            var output = await ExecuteHostToolAsync(tool, reasoned, cancellationToken).ConfigureAwait(false);
             completedTasks++;
             progress?.Report(new(completedTasks, totalTasks, $"{ReadableTool(tool)} complete."));
             return new(
@@ -363,27 +366,33 @@ internal sealed class CreatorConversationTaskExecutor : IAtomicTaskExecutor
 
     private async Task<CreatorTaskOutput> ExecuteHostToolAsync(
         string tool,
-        AtomicTaskDecision decision,
-        CancellationToken cancellationToken) => tool switch
+        ReasonedAtomicTask reasoned,
+        CancellationToken cancellationToken)
     {
-        "FindSceneByTime" => FindScene(),
-        "GetScene" => GetScene(),
-        "GetTranscriptInterval" => GetTranscript(),
-        "GetRelevantFrames" => GetFrames(),
-        "AnalyzeSceneSemantics" or "IdentifyPeopleObjectsActions" => AnalyzeScene(decision),
-        "RunVlmOcr" or "ReconcileOcrResults" => ReadOnScreenText(),
-        "RewriteAdSegment" => RewriteSegment(decision),
-        "CheckForSpoilers" => CheckSpoilers(),
-        "CheckRedundancy" => CheckRedundancy(),
-        "ValidateNarrationWindow" or "EstimateSpeechDuration" => ValidateTiming(),
-        "SynthesizeNarration" => await SynthesizeAsync(decision, cancellationToken).ConfigureAwait(false),
-        "MeasureRenderedNarration" => MeasureNarration(),
-        "ApplyProjectMutation" => await ApplyMutationAsync(cancellationToken).ConfigureAwait(false),
-        "UndoLastMutation" => await UndoAsync(cancellationToken).ConfigureAwait(false),
-        "ValidateProject" => ValidateProject(),
-        "GenerateVideoPreview" => RequestPreview(),
-        _ => throw new InvalidOperationException("SEMANTIC_TOOL_NOT_IMPLEMENTED"),
-    };
+        var decision = reasoned.Decision;
+        return tool switch
+        {
+            "FindSceneByTime" => FindScene(),
+            "GetScene" => GetScene(),
+            "GetTranscriptInterval" => GetTranscript(),
+            "GetRelevantFrames" => GetFrames(),
+            "AnalyzeSceneSemantics" or "IdentifyPeopleObjectsActions" => AnalyzeScene(decision),
+            "RunVlmOcr" or "ReconcileOcrResults" => ReadOnScreenText(),
+            "FindDescriptionOpportunity" => FindDescriptionOpportunity(),
+            "DraftAdSegment" => DraftNewSegment(decision, reasoned.Provenance),
+            "RewriteAdSegment" => RewriteSegment(decision),
+            "CheckForSpoilers" => CheckSpoilers(),
+            "CheckRedundancy" => CheckRedundancy(),
+            "ValidateNarrationWindow" or "EstimateSpeechDuration" => ValidateTiming(),
+            "SynthesizeNarration" => await SynthesizeAsync(decision, cancellationToken).ConfigureAwait(false),
+            "MeasureRenderedNarration" => MeasureNarration(),
+            "ApplyProjectMutation" => await ApplyMutationAsync(cancellationToken).ConfigureAwait(false),
+            "UndoLastMutation" => await UndoAsync(cancellationToken).ConfigureAwait(false),
+            "ValidateProject" => ValidateProject(),
+            "GenerateVideoPreview" => RequestPreview(),
+            _ => throw new InvalidOperationException("SEMANTIC_TOOL_NOT_IMPLEMENTED"),
+        };
+    }
 
     private CreatorTaskOutput FindScene()
     {
@@ -470,6 +479,106 @@ internal sealed class CreatorConversationTaskExecutor : IAtomicTaskExecutor
             $"Verified on-screen text: {string.Join("; ", text)}",
             scene.SceneId,
             SelectedSegmentId);
+    }
+
+    private CreatorTaskOutput FindDescriptionOpportunity()
+    {
+        var scene = TargetScene();
+        var sceneAnalysis = evidence.Analysis.Scenes.Single(item => item.SceneId == scene.SceneId);
+        var essential = sceneAnalysis.Observations
+            .Where(item => !item.AlreadyConveyedBySourceAudio)
+            .Where(item => item.Importance >= AdNecessityPolicy.MinimumImportance)
+            .Where(item => item.Certainty >= AdNecessityPolicy.MinimumCertainty)
+            .ToArray();
+        if (essential.Length == 0)
+        {
+            throw new InvalidOperationException("NO_VERIFIED_VISUAL_FACT");
+        }
+
+        var latestEvidenceTime = essential
+            .SelectMany(item => item.EvidenceIds)
+            .Distinct(StringComparer.Ordinal)
+            .Select(id => scene.Keyframes.Single(frame => frame.EvidenceId == id).SourceTime)
+            .Max();
+        var candidates = evidence.Audio.NarrationWindows
+            .Where(window => window.Overlaps(scene.SourceInterval))
+            .Select(window => Intersect(window, scene.SourceInterval))
+            .SelectMany(window => SubtractCommittedWindows(window, Snapshot.AdSegments.Select(item => item.Window)))
+            .Select(window => new MediaInterval(
+                window.Start > latestEvidenceTime ? window.Start : latestEvidenceTime,
+                window.End))
+            .Where(window => window.Duration >= TimeSpan.FromMilliseconds(900))
+            .OrderByDescending(window => window.Duration)
+            .ThenBy(window => window.Start)
+            .ToArray();
+        if (candidates.Length == 0)
+        {
+            throw new InvalidOperationException("NO_SAFE_WINDOW");
+        }
+
+        var selected = candidates[0];
+        var ids = essential.SelectMany(item => item.EvidenceIds)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        newOpportunity = new(
+            $"conversation-{scene.SceneId}-{(long)selected.Start.TotalMilliseconds}",
+            scene.SceneId,
+            selected,
+            checked((int)selected.Duration.TotalMilliseconds),
+            ids,
+            scene.TranscriptSegmentIds,
+            string.Join("; ", essential.Select(item => item.ObjectiveDescription)),
+            essential.Max(item => item.Importance),
+            essential.Min(item => item.Certainty));
+        proposedSegment = null;
+        return new(
+            $"Found a verified narration window from {FormatTime(selected.Start)} to {FormatTime(selected.End)} in {scene.SceneId}.",
+            scene.SceneId,
+            SelectedSegmentId,
+            PreviewWindow: selected);
+    }
+
+    private CreatorTaskOutput DraftNewSegment(
+        AtomicTaskDecision decision,
+        PromptDecisionProvenance provenance)
+    {
+        var opportunity = newOpportunity
+                          ?? throw new InvalidOperationException("DESCRIPTION_OPPORTUNITY_REQUIRED");
+        ArgumentException.ThrowIfNullOrWhiteSpace(decision.ProposedText);
+        if (!opportunity.VisualEvidenceIds.ToHashSet(StringComparer.Ordinal)
+            .SetEquals(decision.EvidenceIds))
+        {
+            throw new InvalidDataException("DRAFT_EVIDENCE_CHANGED");
+        }
+
+        var text = decision.ProposedText.Trim();
+        var idHash = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            $"{Snapshot.ProjectId:D}\n{Snapshot.Version}\n{opportunity.SceneId}\n{opportunity.Window.Start.Ticks}\n{text}")))
+            .ToLowerInvariant();
+        proposedSegment = new(
+            $"ad-conversation-{idHash[..12]}",
+            opportunity.SceneId,
+            opportunity.Window,
+            text,
+            opportunity.VisualEvidenceIds,
+            provenance.PromptId,
+            provenance.PromptVersion,
+            provenance.PromptSha256,
+            null,
+            null,
+            true,
+            ComputeNewDraftFingerprint(opportunity, text, userRequest));
+        SelectedSegmentId = proposedSegment.SegmentId;
+        spoilerChecked = false;
+        redundancyChecked = false;
+        timingChecked = false;
+        preparedSegments = null;
+        preparedVoiceId = null;
+        return new(
+            "A new evidence-grounded description was proposed but has not been committed.",
+            proposedSegment.SceneId,
+            proposedSegment.SegmentId,
+            proposedSegment.Text);
     }
 
     private CreatorTaskOutput RewriteSegment(AtomicTaskDecision decision)
@@ -660,21 +769,40 @@ internal sealed class CreatorConversationTaskExecutor : IAtomicTaskExecutor
             .Where(path => path is not null && File.Exists(ResolveProjectArtifact(path)))
             .Cast<string>()
             .ToHashSet(StringComparer.Ordinal);
-        Snapshot = await mutationService.ReplaceNarrationAsync(
-            Snapshot.ProjectId,
-            Snapshot.Version,
-            preparedSegments,
-            preparedVoiceId,
-            evidence.AvailableEvidenceIds,
-            availableNarration,
-            proposedSegment is null
-                ? $"Creator conversation regenerated narration with {preparedVoiceId}."
-                : $"Creator conversation replaced {proposedSegment.SegmentId} after evidence, spoiler, redundancy, timing, and synthesis validation.",
-            cancellationToken).ConfigureAwait(false);
+        var isNewSegment = proposedSegment is not null
+                           && Snapshot.AdSegments.All(item => item.SegmentId != proposedSegment.SegmentId);
+        if (isNewSegment)
+        {
+            var prepared = preparedSegments.Single(item => item.SegmentId == proposedSegment!.SegmentId);
+            Snapshot = await mutationService.AddAdSegmentAsync(
+                Snapshot.ProjectId,
+                Snapshot.Version,
+                prepared,
+                evidence.AvailableEvidenceIds,
+                availableNarration,
+                $"Creator conversation added {prepared.SegmentId} after evidence, window, spoiler, redundancy, timing, and synthesis validation.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            Snapshot = await mutationService.ReplaceNarrationAsync(
+                Snapshot.ProjectId,
+                Snapshot.Version,
+                preparedSegments,
+                preparedVoiceId,
+                evidence.AvailableEvidenceIds,
+                availableNarration,
+                proposedSegment is null
+                    ? $"Creator conversation regenerated narration with {preparedVoiceId}."
+                    : $"Creator conversation replaced {proposedSegment.SegmentId} after evidence, spoiler, redundancy, timing, and synthesis validation.",
+                cancellationToken).ConfigureAwait(false);
+        }
         return new(
             proposedSegment is null
                 ? "The newly measured narration voice was committed."
-                : "The validated description and measured narration were committed.",
+                : isNewSegment
+                    ? "The new validated description and measured narration were committed."
+                    : "The validated description and measured narration were committed.",
             proposedSegment?.SceneId,
             proposedSegment?.SegmentId ?? SelectedSegmentId,
             proposedSegment?.Text,
@@ -870,6 +998,12 @@ internal sealed class CreatorConversationTaskExecutor : IAtomicTaskExecutor
 
     private VisualScene TargetScene()
     {
+        var pendingSceneId = proposedSegment?.SceneId ?? newOpportunity?.SceneId;
+        if (pendingSceneId is not null)
+        {
+            return evidence.Visual.Scenes.Single(scene => scene.SceneId == pendingSceneId);
+        }
+
         var segment = TryTargetSegment();
         if (segment is not null)
         {
@@ -896,9 +1030,17 @@ internal sealed class CreatorConversationTaskExecutor : IAtomicTaskExecutor
         }
 
         var selected = TryTargetSegment();
-        return selected is null
-            ? TimeSpan.Zero
-            : selected.Window.Start + TimeSpan.FromTicks(selected.Window.Duration.Ticks / 2);
+        if (selected is not null)
+        {
+            return selected.Window.Start + TimeSpan.FromTicks(selected.Window.Duration.Ticks / 2);
+        }
+
+        if (newOpportunity is not null)
+        {
+            return newOpportunity.Window.Start + TimeSpan.FromTicks(newOpportunity.Window.Duration.Ticks / 2);
+        }
+
+        return TimeSpan.Zero;
     }
 
     private AdSegment TargetSegment() =>
@@ -1018,6 +1160,8 @@ internal sealed class CreatorConversationTaskExecutor : IAtomicTaskExecutor
         "AnalyzeSceneSemantics" => "answering from verified scene evidence",
         "IdentifyPeopleObjectsActions" => "checking visible people, objects, and actions",
         "RunVlmOcr" or "ReconcileOcrResults" => "checking verified on-screen text",
+        "FindDescriptionOpportunity" => "finding a safe description opportunity",
+        "DraftAdSegment" => "drafting the missing description",
         "RewriteAdSegment" => "proposing the description edit",
         "CheckForSpoilers" => "checking for spoilers",
         "CheckRedundancy" => "checking redundancy",
@@ -1056,6 +1200,48 @@ internal sealed class CreatorConversationTaskExecutor : IAtomicTaskExecutor
     private static string ComputeEditFingerprint(AdSegment segment, string text, string request) =>
         Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
             $"creator-edit-v1\n{segment.InputFingerprint}\n{text}\n{request.Trim()}")));
+
+    private static string ComputeNewDraftFingerprint(
+        ProposedAdInterval opportunity,
+        string text,
+        string request) => Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+        $"creator-add-v1\n{JsonSerializer.Serialize(opportunity, ConversationJson.Options)}\n{text}\n{request.Trim()}")));
+
+    private static MediaInterval Intersect(MediaInterval left, MediaInterval right) =>
+        new(left.Start > right.Start ? left.Start : right.Start, left.End < right.End ? left.End : right.End);
+
+    private static List<MediaInterval> SubtractCommittedWindows(
+        MediaInterval source,
+        IEnumerable<MediaInterval> occupied)
+    {
+        var remaining = new List<MediaInterval> { source };
+        foreach (var block in occupied.Where(item => item.Overlaps(source)).OrderBy(item => item.Start))
+        {
+            var next = new List<MediaInterval>();
+            foreach (var candidate in remaining)
+            {
+                if (!candidate.Overlaps(block))
+                {
+                    next.Add(candidate);
+                    continue;
+                }
+
+                if (block.Start > candidate.Start)
+                {
+                    next.Add(new(candidate.Start, block.Start < candidate.End ? block.Start : candidate.End));
+                }
+
+                if (block.End < candidate.End)
+                {
+                    next.Add(new(block.End > candidate.Start ? block.End : candidate.Start, candidate.End));
+                }
+            }
+
+            remaining = next.Where(item => item.End > item.Start).ToList();
+        }
+
+        return remaining;
+    }
 
     private static string FormatTime(TimeSpan value) =>
         $"{(int)value.TotalHours:00}:{value.Minutes:00}:{value.Seconds:00}.{value.Milliseconds:000}";

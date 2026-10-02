@@ -52,6 +52,9 @@ public sealed class CreatorConversationReviewWorkflowTests
                 null,
                 TestContext.Current.CancellationToken);
 
+            Assert.True(
+                result.Manifest.Results.All(item => item.Succeeded),
+                string.Join(" | ", result.Manifest.Results.Where(item => !item.Succeeded).Select(item => $"{item.ToolName}:{item.ErrorCode}:{item.OutputJson}")));
             Assert.Equal(2, result.Snapshot.Version);
             Assert.Equal("A woman places a key on the table.", Assert.Single(result.Snapshot.AdSegments).Text);
             Assert.True(result.Snapshot.AdSegments[0].UserApproved);
@@ -237,6 +240,72 @@ public sealed class CreatorConversationReviewWorkflowTests
         }
     }
 
+    [Fact]
+    public async Task MissingVisualEventCreatesANewValidatedSegmentWithoutReplacingExistingWork()
+    {
+        var fixture = await ProjectFixture.CreateAsync(leaveDescriptionOpportunity: true);
+        try
+        {
+            var plan = new TaskPlan(
+                TaskPlanValidator.CurrentSchemaVersion,
+                "You missed what she picked up at 0:01",
+                [
+                    PlanTask("task-1", "FindDescriptionOpportunity"),
+                    PlanTask("task-2", "DraftAdSegment", "task-1"),
+                    PlanTask("task-3", "CheckForSpoilers", "task-2"),
+                    PlanTask("task-4", "CheckRedundancy", "task-3"),
+                    PlanTask("task-5", "ValidateNarrationWindow", "task-4"),
+                    PlanTask("task-6", "SynthesizeNarration", "task-5"),
+                    PlanTask("task-7", "MeasureRenderedNarration", "task-6"),
+                    PlanTask("task-8", "ApplyProjectMutation", "task-7"),
+                    PlanTask("task-9", "GenerateVideoPreview", "task-8"),
+                ]);
+            var runtime = new RuntimeState(new ConcurrentQueue<string>(
+            [
+                JsonSerializer.Serialize(plan),
+                Decision("task-1", "A safe evidence-grounded window is required."),
+                Decision("task-2", "A new description is proposed.", "She places a brass key on the table.", ["frame-1"]),
+                Decision("task-3", "No spoiler is present."),
+                Decision("task-4", "The description is not redundant."),
+                Decision("task-5", "The description fits the window."),
+                Decision("task-6", "Host synthesis may proceed."),
+                Decision("task-7", "The generated duration may be measured."),
+                Decision("task-8", "The host may append the validated description."),
+                Decision("task-9", "The host may build a focused preview."),
+            ]));
+
+            var result = await CreateWorkflow(fixture, runtime).RunAsync(
+                fixture.ProjectId,
+                fixture.ProjectDirectory,
+                plan.UserRequest,
+                "ad-1",
+                Configuration(),
+                null,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(
+                result.Manifest.Results.All(item => item.Succeeded),
+                string.Join(" | ", result.Manifest.Results.Where(item => !item.Succeeded).Select(item => $"{item.ToolName}:{item.ErrorCode}:{item.OutputJson}")));
+            Assert.Equal(2, result.Snapshot.Version);
+            Assert.Equal(2, result.Snapshot.AdSegments.Count);
+            Assert.Contains(result.Snapshot.AdSegments, item => item.SegmentId == "ad-1" && item.Text == "A door closes behind her.");
+            var added = Assert.Single(result.Snapshot.AdSegments, item => item.SegmentId.StartsWith("ad-conversation-", StringComparison.Ordinal));
+            Assert.Equal("She places a brass key on the table.", added.Text);
+            Assert.Equal(["frame-1"], added.EvidenceIds);
+            Assert.True(added.UserApproved);
+            Assert.NotNull(added.NarrationAssetRelativePath);
+            Assert.True(result.Manifest.PreviewRequested);
+            Assert.All(result.Manifest.Results, item => Assert.True(item.Succeeded));
+            Assert.Equal(10, runtime.GenerationCount);
+            Assert.Equal(10, runtime.UnloadCount);
+            Assert.Equal(1, runtime.MaximumConcurrentGenerations);
+        }
+        finally
+        {
+            fixture.Dispose();
+        }
+    }
+
     private static CreatorConversationReviewWorkflow CreateWorkflow(
         ProjectFixture fixture,
         RuntimeState runtime) => new(
@@ -395,7 +464,7 @@ public sealed class CreatorConversationReviewWorkflowTests
         public string ProjectDirectory { get; }
         public FileProjectVersionStore Store { get; }
 
-        public static async Task<ProjectFixture> CreateAsync()
+        public static async Task<ProjectFixture> CreateAsync(bool leaveDescriptionOpportunity = false)
         {
             var root = Path.Combine(Path.GetTempPath(), "ADFi.Tests", Guid.NewGuid().ToString("N"));
             var projectId = Guid.NewGuid();
@@ -409,8 +478,12 @@ public sealed class CreatorConversationReviewWorkflowTests
             var segment = new AdSegment(
                 "ad-1",
                 "scene-00000",
-                new(TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(4500)),
-                "A woman slowly places a brass key on the wooden table.",
+                leaveDescriptionOpportunity
+                    ? new(TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(1500))
+                    : new(TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(4500)),
+                leaveDescriptionOpportunity
+                    ? "A door closes behind her."
+                    : "A woman slowly places a brass key on the wooden table.",
                 ["frame-1"],
                 "ADFI_AD_WRITER_SYSTEM",
                 "1.0.0",

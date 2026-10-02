@@ -358,6 +358,43 @@
                                             AutomationProperties.Name="Undo last committed project change"
                                             AutomationProperties.HelpText="Creates a compensating version. Existing project history is never erased." />
                                 </WrapPanel>
+                                <TextBlock Text="Final validation"
+                                           Margin="4,12,4,2"
+                                           FontSize="17"
+                                           FontWeight="SemiBold"
+                                           AutomationProperties.HeadingLevel="Level2" />
+                                <TextBlock Text="Checks source integrity, evidence, timing, dialogue collisions, narration audio, and append-only history. Structural errors cannot be overridden. Each warning requires an explicit override before rendering."
+                                           TextWrapping="Wrap" />
+                                <Button x:Name="RunFinalValidationButton"
+                                        Content="Run _final validation"
+                                        TabIndex="33"
+                                        IsEnabled="False"
+                                        HorizontalAlignment="Left"
+                                        Click="RunFinalValidationButton_OnClick"
+                                        AutomationProperties.Name="Run final project validation"
+                                        AutomationProperties.HelpText="Runs the deterministic Phase 11 gate against the committed project and immutable source." />
+                                <ListBox x:Name="FinalValidationIssuesList"
+                                         MinHeight="60"
+                                         MaxHeight="180"
+                                         TabIndex="34"
+                                         DisplayMemberPath="AccessibleLabel"
+                                         SelectionChanged="FinalValidationIssuesList_OnSelectionChanged"
+                                         AutomationProperties.Name="Final validation issues"
+                                         AutomationProperties.HelpText="Blocking issues must be fixed. Select a warning to make the explicit override button available." />
+                                <Button x:Name="OverrideSelectedWarningButton"
+                                        Content="_Override selected warning"
+                                        TabIndex="35"
+                                        IsEnabled="False"
+                                        HorizontalAlignment="Left"
+                                        Click="OverrideSelectedWarningButton_OnClick"
+                                        AutomationProperties.Name="Override selected final validation warning"
+                                        AutomationProperties.HelpText="Records an explicit override for this warning only, then reruns all final checks. Blocking issues cannot be overridden." />
+                                <TextBlock x:Name="FinalValidationStatusText"
+                                           Margin="4"
+                                           Text="Final validation has not run for this project version."
+                                           TextWrapping="Wrap"
+                                           AutomationProperties.Name="Final validation status"
+                                           AutomationProperties.LiveSetting="Polite" />
                             </StackPanel>
                         </GroupBox>
 
@@ -368,7 +405,7 @@
                                 <TextBlock Text="On hold or disputed: unavailable until account services are connected" TextWrapping="Wrap" />
                                 <TextBlock Text="Lifetime earnings: unavailable until account services are connected" TextWrapping="Wrap" />
                                 <Button Content="View earnings _details"
-                                        TabIndex="33"
+                                        TabIndex="36"
                                         IsEnabled="False"
                                         HorizontalAlignment="Left"
                                         AutomationProperties.Name="View explainable earnings details" />
@@ -377,12 +414,12 @@
 
                         <Expander Header="Technical activity"
                                   Margin="4"
-                                  TabIndex="34"
+                                  TabIndex="37"
                                   AutomationProperties.Name="Technical activity for advanced users">
                             <TextBox x:Name="TechnicalActivityTextBox"
                                      Margin="8"
                                      MinHeight="110"
-                                     TabIndex="35"
+                                     TabIndex="38"
                                      IsReadOnly="True"
                                      AcceptsReturn="True"
                                      TextWrapping="Wrap"
@@ -413,7 +450,7 @@
                     <WrapPanel Grid.Row="2" Margin="0,0,0,8">
                         <Button x:Name="RefreshDiscoverButton"
                                 Content="_Refresh DISCOVER"
-                                TabIndex="36"
+                                TabIndex="39"
                                 Click="RefreshDiscoverButton_OnClick"
                                 AutomationProperties.Name="Refresh public ADFied works" />
                         <TextBlock x:Name="DiscoverStateText"
@@ -424,7 +461,7 @@
                     </WrapPanel>
                     <ListView Grid.Row="3"
                               x:Name="DiscoverProjects"
-                              TabIndex="37"
+                              TabIndex="40"
                               AutomationProperties.Name="Public ADFied works"
                               AutomationProperties.HelpText="Use arrow keys to select a work. Open it to use the official YouTube player on its ADFi page."
                               SelectionMode="Single"
@@ -447,20 +484,20 @@
                     <WrapPanel Grid.Row="4" Margin="0,8,0,0">
                         <Button x:Name="OpenDiscoverProjectButton"
                                 Content="_Open selected ADFi page"
-                                TabIndex="38"
+                                TabIndex="41"
                                 IsEnabled="False"
                                 Click="OpenDiscoverProjectButton_OnClick"
                                 AutomationProperties.Name="Open selected ADFi project page in the default browser"
                                 AutomationProperties.HelpText="The project page uses the official YouTube player." />
                         <Button x:Name="CopyDiscoverProjectButton"
                                 Content="_Copy selected project page"
-                                TabIndex="39"
+                                TabIndex="42"
                                 IsEnabled="False"
                                 Click="CopyDiscoverProjectButton_OnClick"
                                 AutomationProperties.Name="Copy selected ADFi project page address" />
                         <Button x:Name="OpenDiscoverViewerButton"
                                 Content="Open in accessible _viewer"
-                                TabIndex="40"
+                                TabIndex="43"
                                 IsEnabled="False"
                                 Click="OpenDiscoverViewerButton_OnClick"
                                 AutomationProperties.Name="Open selected ADFi publication in the Accessible Interactive Video Viewer"

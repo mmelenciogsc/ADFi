@@ -3,6 +3,7 @@ namespace ADFi.Core;
 public enum ProjectMutationKind
 {
     GenerateInitialDraft,
+    AddAdSegment,
     ReplaceAdSegment,
     RemoveAdSegment,
     SelectNarrationVoice,
