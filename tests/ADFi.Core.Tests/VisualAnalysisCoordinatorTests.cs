@@ -69,7 +69,7 @@ public sealed class VisualAnalysisCoordinatorTests
     }
 
     [Fact]
-    public async Task UnsupportedEvidenceIdFailsAndStillUnloadsModel()
+    public async Task UnsupportedEvidenceOnlyProducesAuditableConservativeEmptyResult()
     {
         var root = Path.Combine(Path.GetTempPath(), $"adfi-analysis-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
@@ -87,12 +87,163 @@ public sealed class VisualAnalysisCoordinatorTests
                 Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_VISUAL_ANALYST_SYSTEM.md"),
                 TimeProvider.System);
 
-            await Assert.ThrowsAsync<InvalidDataException>(() => coordinator.AnalyzeAsync(
+            var result = await coordinator.AnalyzeAsync(
                 Guid.NewGuid(), root,
                 [new(scene, new Dictionary<string, string> { ["frame-known"] = frame }, new Dictionary<string, string>(), [])],
-                TestContext.Current.CancellationToken));
+                TestContext.Current.CancellationToken);
+
+            var analysis = Assert.Single(result);
+            Assert.Empty(analysis.Observations);
+            Assert.True(analysis.RequiresAdditionalFrames);
+            Assert.Equal(
+                "No evidence-valid visual observations remained after bounded model validation.",
+                analysis.Uncertainty);
             Assert.True(runtime.Unloaded);
             Assert.Equal(2, runtime.Requests.Count);
+            Assert.True(File.Exists(Path.Combine(root, "visual", "analysis", "rejected", "scene-00000-attempt-02.json")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FinalRetryKeepsOnlyIndependentlySupportedObservations()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"adfi-analysis-conservative-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var frame = Path.Combine(root, "frame.jpg");
+        await File.WriteAllBytesAsync(frame, [1], TestContext.Current.CancellationToken);
+        try
+        {
+            var scene = new VisualScene(
+                "scene-00000", new(TimeSpan.Zero, TimeSpan.FromSeconds(1)),
+                [new("frame-known", TimeSpan.Zero, "frame.jpg", 1, 1, 0, 0, false)], [], []);
+            const string mixedResponse = "{\"sceneId\":\"scene-00000\",\"observations\":[{\"observationId\":\"valid\",\"category\":\"object\",\"objectiveDescription\":\"A red door is closed.\",\"evidenceIds\":[\"frame-known\"],\"certainty\":0.9,\"importance\":0.8,\"alreadyConveyedBySourceAudio\":false},{\"observationId\":\"invalid\",\"category\":\"object\",\"objectiveDescription\":\"An unsupported object.\",\"evidenceIds\":[\"frame-know\"],\"certainty\":0.9,\"importance\":0.2,\"alreadyConveyedBySourceAudio\":false}],\"potentialOnScreenText\":[],\"requiresAdditionalFrames\":false,\"requiresExactOcr\":false,\"uncertainty\":null}";
+            var runtime = new AnalysisRuntime(mixedResponse, mixedResponse);
+            var coordinator = new VisualAnalysisCoordinator(
+                runtime, "qwen3-vl:4b-instruct",
+                Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_VISUAL_ANALYST_SYSTEM.md"),
+                TimeProvider.System);
+
+            var result = await coordinator.AnalyzeAsync(
+                Guid.NewGuid(), root,
+                [new(scene, new Dictionary<string, string> { ["frame-known"] = frame }, new Dictionary<string, string>(), [])],
+                TestContext.Current.CancellationToken);
+
+            var observation = Assert.Single(Assert.Single(result).Observations);
+            Assert.Equal("valid", observation.ObservationId);
+            Assert.Equal(["frame-known"], observation.EvidenceIds);
+            Assert.Equal(2, runtime.Requests.Count);
+            Assert.True(runtime.Unloaded);
+            Assert.True(File.Exists(Path.Combine(root, "visual", "analysis", "rejected", "scene-00000-attempt-02.json")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task OutOfRangeRoutingScoresAreDeterministicallyBounded()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"adfi-analysis-score-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var frame = Path.Combine(root, "frame.jpg");
+        await File.WriteAllBytesAsync(frame, [1], TestContext.Current.CancellationToken);
+        try
+        {
+            var scene = new VisualScene(
+                "scene-00000", new(TimeSpan.Zero, TimeSpan.FromSeconds(1)),
+                [new("frame-known", TimeSpan.Zero, "frame.jpg", 1, 1, 0, 0, false)], [], []);
+            const string response = "{\"sceneId\":\"scene-00000\",\"observations\":[{\"observationId\":\"o\",\"category\":\"object\",\"objectiveDescription\":\"A door.\",\"evidenceIds\":[\"frame-known\"],\"certainty\":-2,\"importance\":3,\"alreadyConveyedBySourceAudio\":false}],\"potentialOnScreenText\":[],\"requiresAdditionalFrames\":false,\"requiresExactOcr\":false,\"uncertainty\":null}";
+            var runtime = new AnalysisRuntime(response);
+            var coordinator = new VisualAnalysisCoordinator(
+                runtime, "qwen-test",
+                Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_VISUAL_ANALYST_SYSTEM.md"),
+                TimeProvider.System);
+
+            var result = await coordinator.AnalyzeAsync(
+                Guid.NewGuid(), root,
+                [new(scene, new Dictionary<string, string> { ["frame-known"] = frame }, new Dictionary<string, string>(), [])],
+                TestContext.Current.CancellationToken);
+
+            var observation = Assert.Single(Assert.Single(result).Observations);
+            Assert.Equal(0m, observation.Certainty);
+            Assert.Equal(1m, observation.Importance);
+            Assert.Single(runtime.Requests);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task TransientRuntimeFailureGetsOneBoundedRetry()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"adfi-analysis-runtime-retry-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var frame = Path.Combine(root, "frame.jpg");
+        await File.WriteAllBytesAsync(frame, [1], TestContext.Current.CancellationToken);
+        try
+        {
+            var scene = new VisualScene(
+                "scene-00000", new(TimeSpan.Zero, TimeSpan.FromSeconds(1)),
+                [new("frame-known", TimeSpan.Zero, "frame.jpg", 1, 1, 0, 0, false)], [], []);
+            const string response = "{\"sceneId\":\"scene-00000\",\"observations\":[],\"potentialOnScreenText\":[],\"requiresAdditionalFrames\":false,\"requiresExactOcr\":false,\"uncertainty\":null}";
+            var runtime = new TransientFailureRuntime(response);
+            var coordinator = new VisualAnalysisCoordinator(
+                runtime, "qwen-test",
+                Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_VISUAL_ANALYST_SYSTEM.md"),
+                TimeProvider.System);
+
+            var result = await coordinator.AnalyzeAsync(
+                Guid.NewGuid(), root,
+                [new(scene, new Dictionary<string, string> { ["frame-known"] = frame }, new Dictionary<string, string>(), [])],
+                TestContext.Current.CancellationToken);
+
+            Assert.Single(result);
+            Assert.Equal(2, runtime.RequestCount);
+            Assert.True(runtime.Unloaded);
+            Assert.True(File.Exists(Path.Combine(root, "visual", "analysis", "rejected", "scene-00000-attempt-01.json")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RepeatedRuntimeFailureProducesConservativeUnresolvedScene()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"adfi-analysis-runtime-unavailable-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var frame = Path.Combine(root, "frame.jpg");
+        await File.WriteAllBytesAsync(frame, [1], TestContext.Current.CancellationToken);
+        try
+        {
+            var scene = new VisualScene(
+                "scene-00000", new(TimeSpan.Zero, TimeSpan.FromSeconds(1)),
+                [new("frame-known", TimeSpan.Zero, "frame.jpg", 1, 1, 0, 0, false)], [], []);
+            var runtime = new TransientFailureRuntime();
+            var coordinator = new VisualAnalysisCoordinator(
+                runtime, "qwen-test",
+                Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_VISUAL_ANALYST_SYSTEM.md"),
+                TimeProvider.System);
+
+            var result = await coordinator.AnalyzeAsync(
+                Guid.NewGuid(), root,
+                [new(scene, new Dictionary<string, string> { ["frame-known"] = frame }, new Dictionary<string, string>(), [])],
+                TestContext.Current.CancellationToken);
+
+            var analysis = Assert.Single(result);
+            Assert.Empty(analysis.Observations);
+            Assert.True(analysis.RequiresAdditionalFrames);
+            Assert.Equal("Visual model requests failed after one bounded retry.", analysis.Uncertainty);
+            Assert.Equal(2, runtime.RequestCount);
+            Assert.True(runtime.Unloaded);
         }
         finally
         {
@@ -241,6 +392,39 @@ public sealed class VisualAnalysisCoordinatorTests
             ImagePaths = request.ImagePaths;
             Requests.Add(request);
             return Task.FromResult(new LocalModelResponse(queuedResponses.Dequeue(), modelName, TimeSpan.FromSeconds(1)));
+        }
+
+        public Task UnloadAsync(string modelName, CancellationToken cancellationToken)
+        {
+            Unloaded = true;
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class TransientFailureRuntime(params string[] responses) : ILocalModelRuntime
+    {
+        private readonly Queue<string> queuedResponses = new(responses);
+
+        public string RuntimeName => "test-runtime";
+        public int RequestCount { get; private set; }
+        public bool Unloaded { get; private set; }
+
+        public Task EnsureModelAvailableAsync(string modelName, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<LocalModelResponse> GenerateAsync(
+            string modelName,
+            LocalModelRequest request,
+            CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            if (RequestCount == 1 || queuedResponses.Count == 0)
+            {
+                throw new InvalidOperationException("Ollama request failed transiently.");
+            }
+
+            return Task.FromResult(new LocalModelResponse(queuedResponses.Dequeue(), modelName, TimeSpan.Zero));
         }
 
         public Task UnloadAsync(string modelName, CancellationToken cancellationToken)

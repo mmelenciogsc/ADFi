@@ -20,6 +20,7 @@ public sealed record ReviewPreviewManifest(
     Guid ProjectId,
     string SourceSha256,
     string NarrationInputSha256,
+    string RenderProfileVersion,
     string FullDraftRelativePath,
     string FullDraftSha256,
     string? FocusPreviewRelativePath,
@@ -107,6 +108,7 @@ public sealed class PreviewAssemblyService(
             request.ProjectId,
             actualSourceSha256,
             narrationInputSha256,
+            renderer.RenderProfileVersion,
             Relative(projectDirectory, fullDraftPath),
             render.Sha256,
             focus?.RelativePath,
@@ -162,6 +164,7 @@ public sealed class PreviewAssemblyService(
         if (manifest.ProjectId != request.ProjectId
             || !string.Equals(manifest.SourceSha256, sourceSha256, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(manifest.NarrationInputSha256, narrationInputSha256, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(manifest.RenderProfileVersion, renderer.RenderProfileVersion, StringComparison.Ordinal)
             || manifest.Duration != request.SourceProbe.Duration
             || manifest.ReviewState != "REVIEW_IN_PROGRESS")
         {

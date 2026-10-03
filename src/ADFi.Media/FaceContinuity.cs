@@ -44,7 +44,8 @@ public sealed record FaceContinuityManifest(
     IReadOnlyList<FaceObservation> Observations,
     IReadOnlyList<FaceCluster> Clusters,
     IReadOnlyList<ADFi.Core.ProjectEntity> Entities,
-    DateTimeOffset CompletedAtUtc);
+    DateTimeOffset CompletedAtUtc,
+    string? VisualIndexSha256 = null);
 
 public static class FaceContinuityPolicy
 {
@@ -240,11 +241,13 @@ public sealed class FaceContinuityIndexService(
     public async Task<FaceContinuityManifest> BuildAsync(
         Guid projectId,
         string sourceSha256,
+        string visualIndexSha256,
         VisualIndexManifest visualIndex,
         string projectDirectory,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceSha256);
+        ArgumentException.ThrowIfNullOrWhiteSpace(visualIndexSha256);
         ArgumentNullException.ThrowIfNull(visualIndex);
         if (visualIndex.ProjectId != projectId
             || !string.Equals(visualIndex.SourceSha256, sourceSha256, StringComparison.OrdinalIgnoreCase))
@@ -318,7 +321,8 @@ public sealed class FaceContinuityIndexService(
             observations,
             clusters,
             entities,
-            timeProvider.GetUtcNow());
+            timeProvider.GetUtcNow(),
+            visualIndexSha256);
         var path = Path.Combine(Path.GetFullPath(projectDirectory), "manifests", "face-continuity.json");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temporary = path + ".partial";

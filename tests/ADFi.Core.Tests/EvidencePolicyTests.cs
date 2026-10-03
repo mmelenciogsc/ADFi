@@ -82,6 +82,136 @@ public sealed class EvidencePolicyTests
     }
 
     [Fact]
+    public void ImportantOpeningVisualUsesDuckedSoundBedWhenNoQuietWindowExists()
+    {
+        var scene = new VisualScene(
+            "scene-opening",
+            new(TimeSpan.Zero, TimeSpan.FromSeconds(12)),
+            [new("frame-opening", TimeSpan.FromSeconds(1), "frames/opening.jpg", 640, 360, 0, 0, false)],
+            [],
+            []);
+        var fact = new VisualFact(
+            "fact-opening", "scene-opening", "A rabbit emerges into a meadow.", 0.95m, 0.95m,
+            false, TimeSpan.FromSeconds(1), null, ["frame-opening"]);
+
+        var proposed = AdNecessityPolicy.Propose(
+            [scene],
+            [fact],
+            [],
+            TimeSpan.FromSeconds(2),
+            [new(TimeSpan.FromMilliseconds(250), TimeSpan.FromSeconds(11.75))]);
+
+        var interval = Assert.Single(proposed);
+        Assert.Equal(TimeSpan.FromSeconds(1), interval.Window.Start);
+        Assert.Equal("scene-opening", interval.SceneId);
+    }
+
+    [Fact]
+    public void QuietWindowIsPreferredAndDuckedFallbackIsSpaced()
+    {
+        var scenes = Enumerable.Range(0, 3)
+            .Select(index => new VisualScene(
+                $"scene-{index}",
+                new(TimeSpan.FromSeconds(index * 10), TimeSpan.FromSeconds((index + 1) * 10)),
+                [new(
+                    $"frame-{index}",
+                    TimeSpan.FromSeconds(index * 10 + 1),
+                    $"frames/{index}.jpg",
+                    640,
+                    360,
+                    0,
+                    0,
+                    false)],
+                [],
+                []))
+            .ToArray();
+        var facts = scenes.Select((scene, index) => new VisualFact(
+            $"fact-{index}", scene.SceneId, $"Visual change {index}.", 0.95m, 0.95m, false,
+            scene.Keyframes[0].SourceTime, null, [scene.Keyframes[0].EvidenceId])).ToArray();
+
+        var proposed = AdNecessityPolicy.Propose(
+            scenes,
+            facts,
+            [new(TimeSpan.FromSeconds(12), TimeSpan.FromSeconds(19))],
+            TimeSpan.FromSeconds(2),
+            [
+                new(TimeSpan.Zero, TimeSpan.FromSeconds(10)),
+                new(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(25)),
+            ],
+            TimeSpan.FromSeconds(8));
+
+        Assert.Equal(2, proposed.Count);
+        Assert.Equal("scene-0", proposed[0].SceneId);
+        Assert.Equal("scene-1", proposed[1].SceneId);
+        Assert.DoesNotContain(proposed, item => item.SceneId == "scene-2");
+    }
+
+    [Fact]
+    public void OpportunityIsSuppressedWhenOnlyWindowStartsAfterVisualEvidenceExpires()
+    {
+        var scene = new VisualScene(
+            "scene-stale",
+            new(TimeSpan.Zero, TimeSpan.FromSeconds(15)),
+            [new("frame-stale", TimeSpan.FromSeconds(1), "frames/stale.jpg", 640, 360, 0, 0, false)],
+            [],
+            []);
+        var fact = new VisualFact(
+            "fact-stale",
+            "scene-stale",
+            "A sheep crosses the field.",
+            0.9m,
+            0.95m,
+            false,
+            TimeSpan.FromSeconds(1),
+            null,
+            ["frame-stale"]);
+
+        var result = AdNecessityPolicy.Propose(
+            [scene],
+            [fact],
+            [],
+            TimeSpan.FromSeconds(2),
+            [new(TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(15))]);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void EarlyCurrentFactCanBeDescribedWithoutWaitingForLaterSceneEvidence()
+    {
+        var scene = new VisualScene(
+            "scene-sequence",
+            new(TimeSpan.Zero, TimeSpan.FromSeconds(15)),
+            [
+                new("frame-early", TimeSpan.FromSeconds(1), "frames/early.jpg", 640, 360, 0, 0, false),
+                new("frame-late", TimeSpan.FromSeconds(13), "frames/late.jpg", 640, 360, 0, 0, false),
+            ],
+            [],
+            []);
+        var facts = new[]
+        {
+            new VisualFact(
+                "fact-early", "scene-sequence", "A sheep steps onto a boulder.", 0.9m, 0.95m,
+                false, TimeSpan.FromSeconds(1), null, ["frame-early"]),
+            new VisualFact(
+                "fact-late", "scene-sequence", "The sheep reaches the far hill.", 0.9m, 0.95m,
+                false, TimeSpan.FromSeconds(13), null, ["frame-late"]),
+        };
+
+        var result = AdNecessityPolicy.Propose(
+            [scene],
+            facts,
+            [],
+            TimeSpan.FromSeconds(2),
+            [new(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(15))]);
+
+        var opportunity = Assert.Single(result);
+        Assert.Equal(TimeSpan.FromSeconds(1), opportunity.Window.Start);
+        Assert.Contains("steps onto a boulder", opportunity.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("far hill", opportunity.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FinalValidationRejectsOverlapMissingEvidenceAndOverrun()
     {
         var segments = new[]

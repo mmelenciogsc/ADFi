@@ -36,19 +36,26 @@ public sealed class NarrationAutoFitCoordinatorTests
     }
 
     [Fact]
-    public async Task SemanticEvidenceLossIsRejected()
+    public async Task SemanticEvidenceLossFallsBackToRequiredReviewWithoutAbortingProject()
     {
         var runtime = new RewriteRuntime("{\"text\":\"She moves.\",\"evidenceIds\":[\"frame-1\"]}");
-        var synth = new DurationSynthesizer(TimeSpan.FromSeconds(4));
+        var synth = new DurationSynthesizer(
+            TimeSpan.FromSeconds(4),
+            TimeSpan.FromSeconds(4),
+            TimeSpan.FromSeconds(4));
         var coordinator = new NarrationAutoFitCoordinator(
             synth,
             runtime,
             "qwen3-vl:4b-instruct",
             Path.Combine(FindRepositoryRoot(), "prompts", "ADFI_AD_WRITER_SYSTEM.md"));
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => coordinator.FitAsync(
-            Segment(), "voice-1", TimeSpan.FromMilliseconds(250), TestContext.Current.CancellationToken));
-        Assert.Equal(1, runtime.UnloadCount);
+        var result = await coordinator.FitAsync(
+            Segment(), "voice-1", TimeSpan.FromMilliseconds(250), TestContext.Current.CancellationToken);
+
+        Assert.True(result.RequiresUserReview);
+        Assert.Equal(Segment().Text, result.Segment.Text);
+        Assert.Equal(NarrationTimingPolicy.MaximumAutoFitAttempts - 1, runtime.GenerationCount);
+        Assert.Equal(NarrationTimingPolicy.MaximumAutoFitAttempts - 1, runtime.UnloadCount);
     }
 
     [Fact]

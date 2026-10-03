@@ -42,7 +42,9 @@ human-approved replacement only when exactly one generated segment is timing-blo
 full-film review, `--approved-review-file` accepts a versioned JSON list containing exactly one
 explicitly reviewed replacement for every timing-blocked segment. Both paths synthesize and measure
 the replacements, append one audited project mutation and refuse stale or changed reviewed state;
-neither is an automatic validation bypass.
+neither is an automatic validation bypass. `--accept-generated-redraft` permits the diagnostic
+runner to replace its own unreviewed generated baseline when an algorithm-version change correctly
+invalidates downstream checkpoints; it does not overwrite accepted user edits.
 
 ## Results
 
@@ -144,11 +146,11 @@ development machine. Every source retained its intake SHA-256. Every final MP4 p
 FFmpeg decode, matched the SHA-256 in its finalization manifest, and contains H.264 video plus the
 new AAC stereo mix.
 
-| Case | Scenes | AD segments | Final MP4 | Final SHA-256 |
-| --- | ---: | ---: | --- | --- |
-| Dialogue: *Cosmos Laundromat* | 55 | 3 | `D:\ADFi-DemoRuns\Projects\18f09f03-ebec-74f0-6a3d-6b68e74de10c\final\v00000003-54ae7549bbc3-with-narration\03_Cosmos_Laundromat_Dialogue_CC-BY-SA-4.0-ADFi.mp4` | `8a5b9f239797d6090873f244cd84a0487ec1a3c3c992f8fda45d66c0bbcbf08e` |
-| Music/effects without dialogue: *Big Buck Bunny* | 59 | 4 | `D:\ADFi-DemoRuns\Projects\035a0e3e-6edc-3e96-9725-8bf80043b56e\final\v00000003-24a1439eaa5e-with-narration\01_Big_Buck_Bunny_YouTube_CC-BY-3.0-ADFi.mp4` | `dc459b04d63a1c526fb6d7e082282f6397806ca5d9af54158721eefd82583ea1` |
-| Fully silent: *A Trip to the Moon* | 52 | 51 | `D:\ADFi-DemoRuns\Projects\53c9122c-fc3a-30a5-0d70-2e7776b437b4\final\v00000003-123e30da4765-with-narration\02_A_Trip_to_the_Moon_Public_Domain-ADFi.mp4` | `8a067ac3e9d9f5cbc188348e82cb21de0504724bab0bedc14803ef77c1486a80` |
+| Case | Scenes | AD segments | First cue | Final MP4 | Final SHA-256 |
+| --- | ---: | ---: | ---: | --- | --- |
+| Dialogue: *Cosmos Laundromat* | 197 | 36 | 00:07.500 | `D:\ADFi-DemoRuns\Projects\18f09f03-ebec-74f0-6a3d-6b68e74de10c\final\v00000013-8c68e589dd40-mixdfd741c9-with-narration\03_Cosmos_Laundromat_Dialogue_CC-BY-SA-4.0-ADFi.mp4` | `ea37f0ce9869a582a65a348d8ddf329799a5d46c3b40d07342a9a979ae57d5f4` |
+| Music/effects without dialogue: *Big Buck Bunny* | 183 | 42 | 00:01.923 | `D:\ADFi-DemoRuns\Projects\035a0e3e-6edc-3e96-9725-8bf80043b56e\final\v00000007-2eaed73d6a0b-mixdfd741c9-with-narration\01_Big_Buck_Bunny_YouTube_CC-BY-3.0-ADFi.mp4` | `16f87109494a907a2bc72bc5037aef93d65df3f85d03aad98c0c5bb0aae65ffc` |
+| Fully silent: *A Trip to the Moon* | 70 | 57 | 00:02.000 | `D:\ADFi-DemoRuns\Projects\53c9122c-fc3a-30a5-0d70-2e7776b437b4\final\v00000007-12498e791c1e-mixdfd741c9-with-narration\02_A_Trip_to_the_Moon_Public_Domain-ADFi.mp4` | `c294aac55d16e721278cd5ea6aa2a721361af3c99715cab4df40b20c0191b294` |
 
 The run exposed and corrected additional general defects: Phase 4 now persists and fingerprints its
 per-scene text-locator result and falls back conservatively after bounded malformed-output retries;
@@ -157,14 +159,24 @@ hash cannot recur in another scene; full-film timing review accepts an exact, ve
 explicitly reviewed replacements; AD drafting retains malformed private output for diagnosis,
 recovers only complete evidence-validated core fields when a constrained model truncates an
 auxiliary field, compacts only intact source sentences/clauses, and closes an existing Windows file
-handle before replacing a resumed compacted draft.
+handle before replacing a resumed compacted draft. A second correction pass found that FFmpeg's
+narration input pad had been consumed by `sidechaincompress` and then reused illegally by `amix`, so
+the final mix could contain only the ducked source. The renderer now explicitly `asplit`s narration
+into independent sidechain and audible-mix branches and records
+`adfi-final-render-v2-audible-narration` in preview/final manifests and content-addressed paths so
+an older silent render can never be restored as current. It also corrected digital-silence
+normalization, repeated single-character Whisper music hallucinations, sparse opening-title
+detection, temporal keyframe displacement, stale downstream checkpoint binding, and the policy that
+previously treated every music/effects interval as an absolute narration prohibition. The fallback
+now uses bounded, spaced, smoothly ducked dialogue-free windows while still excluding dialogue.
 
-The full outputs are diagnostic evidence, not automatically approved public masters. Cosmos needed
-no warning override. Big Buck Bunny retains one possible narration-click warning outside the chosen
-walkthrough excerpt. The silent-film run deliberately records six low-confidence visual-state
-warnings, one likely duplicate-description warning and one possible-click warning; its complete AD
-script therefore needs human editorial review before publication. The diagnostic runner records
-each explicit review or warning override in the append-only mutation history rather than hiding it.
+Every timing overrun in these corrected runs received an explicit, evidence-grounded wording review
+before finalization. The corrected MP4s pass full FFmpeg decode and manifest-hash verification.
+Audio extracted from each final MP4—not merely its standalone Piper assets—was independently checked
+for cue-level energy and recognizable speech. For example, Cosmos rises from -48.4 dB mean in the
+source opening interval to -15.5 dB in the final, and Whisper recovers both the opening title and a
+later description from the final mix. These are diagnostic outputs; normal human editorial viewing
+and listening is still required before public release.
 
 Walkthrough-ready paired excerpts, nine native-resolution stills, contact sheets, alt text, hashes
 and license/provenance metadata are stored outside Git at `D:\ADFi-DemoAssets`. The canonical index

@@ -25,6 +25,8 @@ public sealed record FinalRenderResult(
 
 public interface IFinalMediaRenderer
 {
+    string RenderProfileVersion => "adfi-final-render-v1";
+
     Task<FinalRenderResult> RenderAsync(
         FinalRenderRequest request,
         CancellationToken cancellationToken);
@@ -32,6 +34,10 @@ public interface IFinalMediaRenderer
 
 public sealed class FinalRenderService(string ffmpegPath, IMediaProbe mediaProbe) : IFinalMediaRenderer
 {
+    public const string CurrentRenderProfileVersion = "adfi-final-render-v2-audible-narration";
+
+    public string RenderProfileVersion => CurrentRenderProfileVersion;
+
     public async Task<FinalRenderResult> RenderAsync(
         FinalRenderRequest request,
         CancellationToken cancellationToken)
@@ -171,9 +177,10 @@ public sealed class FinalRenderService(string ffmpegPath, IMediaProbe mediaProbe
             "-hide_banner", "-loglevel", "error", "-y",
             "-i", sourcePath, "-i", narrationPath,
             "-filter_complex",
-            "[0:a]aresample=48000[original];[1:a]aresample=48000[narration];" +
-            "[original][narration]sidechaincompress=threshold=0.025:ratio=3:attack=120:release=650[ducked];" +
-            "[ducked][narration]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[mixed]",
+            "[0:a]aresample=48000[original];" +
+            "[1:a]aresample=48000,pan=stereo|c0=c0|c1=c0,asplit=2[narration_sidechain][narration_mix];" +
+            "[original][narration_sidechain]sidechaincompress=threshold=0.025:ratio=3:attack=120:release=650[ducked];" +
+            "[ducked][narration_mix]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[mixed]",
             "-map", "[mixed]", "-t", Format(duration), "-c:a", "aac", "-b:a", "192k", outputPath,
         ],
         "AUDIO_MIX_FAILED",

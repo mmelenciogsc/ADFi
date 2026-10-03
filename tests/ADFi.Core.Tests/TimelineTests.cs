@@ -40,6 +40,23 @@ public sealed class TimelineTests
     }
 
     [Fact]
+    public void TranscriptMergeSuppressesRepeatedSingleLetterMusicHallucinations()
+    {
+        var segments = new[]
+        {
+            Segment("noise-1", "chunk-1", 3.5, 4.5, "A"),
+            Segment("noise-2", "chunk-1", 4.6, 5.2, "A"),
+            Segment("noise-3", "chunk-1", 5.3, 6.1, "A"),
+            Segment("real", "chunk-1", 8, 9, "Come here."),
+            Segment("isolated", "chunk-1", 12, 13, "I"),
+        };
+
+        var merged = TranscriptMerger.Merge(segments, TimeSpan.FromMinutes(1));
+
+        Assert.Equal(["real", "isolated"], merged.Select(item => item.SegmentId));
+    }
+
+    [Fact]
     public void NarrationWindowsExcludeMeaningfulSourceSoundAndKeepBreathingRoom()
     {
         var timeline = new[]
@@ -62,6 +79,27 @@ public sealed class TimelineTests
     }
 
     [Fact]
+    public void DuckedSoundWindowsMergeAllDialogueFreeAudioButNeverDialogue()
+    {
+        var timeline = new[]
+        {
+            Audio(SourceAudioKind.Dialogue, 0, 4),
+            Audio(SourceAudioKind.MeaningfulNonDialogue, 4, 10),
+            Audio(SourceAudioKind.QuietCandidate, 10, 14),
+        };
+
+        var windows = NarrationWindowPlanner.FindDuckedSoundWindows(
+            TimeSpan.FromSeconds(14),
+            timeline,
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromMilliseconds(250));
+
+        var window = Assert.Single(windows);
+        Assert.Equal(TimeSpan.FromSeconds(4.25), window.Start);
+        Assert.Equal(TimeSpan.FromSeconds(13.75), window.End);
+    }
+
+    [Fact]
     public void KeyframeSequenceIsBoundedAndTemporal()
     {
         var times = KeyframeSequencePlanner.SelectTimes(
@@ -70,6 +108,26 @@ public sealed class TimelineTests
 
         Assert.Equal(
             [TimeSpan.FromSeconds(11), TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(19)],
+            times);
+    }
+
+    [Fact]
+    public void SalientCandidatesDoNotDisplacePlannedTemporalCoverage()
+    {
+        var scene = new MediaInterval(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(25));
+        var candidates = Enumerable.Range(0, 12)
+            .Select(index => new FrameCandidate(
+                TimeSpan.FromSeconds(10 + index * 0.5),
+                0.9m,
+                0.9m,
+                0.9m,
+                true))
+            .ToArray();
+
+        var times = KeyframeSequencePlanner.SelectTimes(scene, 3, candidates);
+
+        Assert.Equal(
+            [TimeSpan.FromSeconds(11.5), TimeSpan.FromSeconds(17.5), TimeSpan.FromSeconds(23.5)],
             times);
     }
 

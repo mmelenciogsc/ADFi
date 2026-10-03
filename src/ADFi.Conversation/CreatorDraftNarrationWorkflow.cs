@@ -21,7 +21,8 @@ public sealed record AdOpportunityManifest(
     string VisualAnalysisSha256,
     IReadOnlyList<VisualFact> VerifiedFacts,
     IReadOnlyList<ProposedAdInterval> Opportunities,
-    DateTimeOffset CompletedAtUtc);
+    DateTimeOffset CompletedAtUtc,
+    string? PolicyVersion = null);
 
 public sealed record NarrationSegmentManifest(
     string VoiceId,
@@ -195,6 +196,7 @@ public sealed class CreatorDraftNarrationWorkflow(
                        && string.Equals(manifest.AudioAnalysisSha256, audioAnalysisSha256, StringComparison.OrdinalIgnoreCase)
                        && string.Equals(manifest.VisualIndexSha256, visualIndexSha256, StringComparison.OrdinalIgnoreCase)
                        && string.Equals(manifest.VisualAnalysisSha256, visualAnalysisSha256, StringComparison.OrdinalIgnoreCase)
+                       && string.Equals(manifest.PolicyVersion, AdNecessityPolicy.Version, StringComparison.Ordinal)
                        && manifest.Opportunities.All(item =>
                            item.Window.Duration >= configuration.MinimumNarrationWindow);
             }
@@ -206,7 +208,7 @@ public sealed class CreatorDraftNarrationWorkflow(
 
         public async Task<PipelineCheckpoint> ExecuteAsync(Guid projectId, CancellationToken cancellationToken)
         {
-            progress?.Report(new(Phase, 0, analysis.Scenes.Count, "Selecting necessary descriptions and quiet narration windows."));
+            progress?.Report(new(Phase, 0, analysis.Scenes.Count, "Selecting necessary descriptions and dialogue-safe narration windows."));
             var sceneLookup = visual.Scenes.ToDictionary(scene => scene.SceneId, StringComparer.Ordinal);
             var facts = analysis.Scenes
                 .OrderBy(scene => sceneLookup[scene.SceneId].SourceInterval.Start)
@@ -216,7 +218,13 @@ public sealed class CreatorDraftNarrationWorkflow(
                 visual.Scenes,
                 facts,
                 audio.NarrationWindows,
-                configuration.MinimumNarrationWindow);
+                configuration.MinimumNarrationWindow,
+                NarrationWindowPlanner.FindDuckedSoundWindows(
+                    source.Source.Probe.Duration,
+                    audio.SourceAudioTimeline,
+                    configuration.MinimumNarrationWindow,
+                    configuration.BreathingRoom),
+                TimeSpan.FromSeconds(8));
             var manifest = new AdOpportunityManifest(
                 projectId,
                 source.Source.SourceSha256,
@@ -225,7 +233,8 @@ public sealed class CreatorDraftNarrationWorkflow(
                 visualAnalysisSha256,
                 facts,
                 opportunities,
-                timeProvider.GetUtcNow());
+                timeProvider.GetUtcNow(),
+                AdNecessityPolicy.Version);
             await WriteAsync(Path.Combine(root, "manifests", "ad-opportunities.json"), manifest, cancellationToken)
                 .ConfigureAwait(false);
             progress?.Report(new(Phase, analysis.Scenes.Count, analysis.Scenes.Count,
@@ -237,6 +246,7 @@ public sealed class CreatorDraftNarrationWorkflow(
         private static IEnumerable<VisualFact> ToFacts(VisualSceneAnalysis analysis, VisualScene scene)
         {
             var frameTimes = scene.Keyframes.ToDictionary(frame => frame.EvidenceId, frame => frame.SourceTime, StringComparer.Ordinal);
+            var frameLookup = scene.Keyframes.ToDictionary(frame => frame.EvidenceId, StringComparer.Ordinal);
             foreach (var observation in analysis.Observations)
             {
                 if (observation.EvidenceIds.Count == 0
@@ -245,6 +255,46 @@ public sealed class CreatorDraftNarrationWorkflow(
                     throw new InvalidDataException($"Scene {scene.SceneId} contains unsupported visual evidence.");
                 }
 
+                var category = observation.Category.Replace('-', '_').Trim().ToLowerInvariant();
+                if (category == "established_entities")
+                {
+                    // Entity-graph bookkeeping is context for naming visible subjects; it is not
+                    // itself something a viewer can see and therefore must never become AD text.
+                    continue;
+                }
+
+                var supportingEvidence = observation.EvidenceIds;
+                if (category is "text" or "on_screen_text" or "onscreen_text")
+                {
+                    // A compact VLM can occasionally attach a title reading to an adjacent black
+                    // frame in the ordered sequence. Require the deterministic edge detector to
+                    // agree that the cited frame can actually contain text before the reading is
+                    // eligible for narration.
+                    supportingEvidence = observation.EvidenceIds
+                        .Where(id => frameLookup[id].PotentialText)
+                        .ToArray();
+                    if (supportingEvidence.Count == 0)
+                    {
+                        continue;
+                    }
+                }
+
+                if (category == "scene_change"
+                    && (observation.ObjectiveDescription.Contains("text", StringComparison.OrdinalIgnoreCase)
+                        || observation.ObjectiveDescription.Contains("title", StringComparison.OrdinalIgnoreCase))
+                    && supportingEvidence.All(id => !frameLookup[id].PotentialText))
+                {
+                    // Reject an inferred text/title transition when its cited frame contains no
+                    // deterministic text-like evidence. This prevents a model from announcing a
+                    // later title while the current rendered frame is still black.
+                    continue;
+                }
+
+                var isTemporalObservation = category is "scene_change" or "transition" or "camera_movement";
+                var availableFrom = isTemporalObservation
+                    ? supportingEvidence.Max(id => frameTimes[id])
+                    : supportingEvidence.Min(id => frameTimes[id]);
+
                 yield return new(
                     observation.ObservationId,
                     scene.SceneId,
@@ -252,9 +302,12 @@ public sealed class CreatorDraftNarrationWorkflow(
                     observation.Importance,
                     observation.Certainty,
                     observation.AlreadyConveyedBySourceAudio,
-                    observation.EvidenceIds.Max(id => frameTimes[id]),
+                    // Stable visual facts are available from their earliest supported frame.
+                    // A change, transition, or camera movement is only established by its last
+                    // supporting frame and must not be narrated in advance.
+                    availableFrom,
                     null,
-                    observation.EvidenceIds);
+                    supportingEvidence);
             }
         }
     }

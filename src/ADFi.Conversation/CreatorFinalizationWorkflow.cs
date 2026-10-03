@@ -36,6 +36,7 @@ public sealed record FinalizedProjectExport(
     string FinalValidationBindingSha256,
     IReadOnlyList<FinalizedAdScriptEntry> AudioDescriptionScript,
     IReadOnlyList<FinalNarrationExport> NarrationAssets,
+    string RenderProfileVersion,
     DateTimeOffset CreatedAtUtc);
 
 public sealed record FinalRenderCompletionManifest(
@@ -56,6 +57,7 @@ public sealed record FinalRenderCompletionManifest(
     string ProjectExportSha256,
     bool NarrationAssetsIncluded,
     IReadOnlyList<FinalNarrationExport> NarrationAssets,
+    string RenderProfileVersion,
     string State,
     DateTimeOffset CompletedAtUtc);
 
@@ -102,7 +104,8 @@ public sealed class CreatorFinalizationWorkflow(
             var bundleRelative = BundleRelativePath(
                 gate.Snapshot.Version,
                 gate.ValidationBindingSha256,
-                request.IncludeNarrationAssets);
+                request.IncludeNarrationAssets,
+                renderer.RenderProfileVersion);
             var bundle = ResolveProjectArtifact(root, bundleRelative);
             var completionRelative = CombineRelative(bundleRelative, "final-render-complete.json");
             var completionPath = ResolveProjectArtifact(root, completionRelative);
@@ -196,6 +199,7 @@ public sealed class CreatorFinalizationWorkflow(
                 gate.ValidationBindingSha256,
                 script,
                 exportedNarration,
+                renderer.RenderProfileVersion,
                 completedAt);
             await WriteJsonAsync(stagedExport, projectExport, cancellationToken).ConfigureAwait(false);
             var exportHash = await HashFileAsync(stagedExport, cancellationToken).ConfigureAwait(false);
@@ -217,6 +221,7 @@ public sealed class CreatorFinalizationWorkflow(
                 exportHash,
                 request.IncludeNarrationAssets,
                 exportedNarration,
+                renderer.RenderProfileVersion,
                 "FINAL_RENDER_COMPLETE",
                 completedAt);
             await WriteJsonAsync(Path.Combine(staging, "final-render-complete.json"), completion, cancellationToken)
@@ -370,6 +375,7 @@ public sealed class CreatorFinalizationWorkflow(
         if (manifest.ProjectId != request.ProjectId
             || manifest.ProjectVersion != gate.Snapshot.Version
             || manifest.State != "FINAL_RENDER_COMPLETE"
+            || !string.Equals(manifest.RenderProfileVersion, renderer.RenderProfileVersion, StringComparison.Ordinal)
             || manifest.NarrationAssetsIncluded != request.IncludeNarrationAssets
             || manifest.Duration != gate.Snapshot.MediaDuration
             || !string.Equals(manifest.SourceSha256, gate.Snapshot.SourceSha256, StringComparison.OrdinalIgnoreCase)
@@ -521,10 +527,20 @@ public sealed class CreatorFinalizationWorkflow(
     private static string FormatTimestamp(TimeSpan value) =>
         $"{(int)value.TotalHours:00}:{value.Minutes:00}:{value.Seconds:00}.{value.Milliseconds:000}";
 
-    private static string BundleRelativePath(int version, string stateHash, bool includeNarration) =>
+    private static string BundleRelativePath(
+        int version,
+        string stateHash,
+        bool includeNarration,
+        string renderProfileVersion) =>
         CombineRelative(
             "final",
-            $"v{version:00000000}-{stateHash[..12].ToLowerInvariant()}-{(includeNarration ? "with-narration" : "without-narration")}");
+            $"v{version:00000000}-{stateHash[..12].ToLowerInvariant()}-mix{ProfileToken(renderProfileVersion)}-{(includeNarration ? "with-narration" : "without-narration")}");
+
+    private static string ProfileToken(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..8].ToLowerInvariant();
+    }
 
     private static string CombineRelative(params string[] parts) =>
         string.Join('/', parts.Select(part => part.Trim('/', '\\')).Where(part => part.Length > 0));

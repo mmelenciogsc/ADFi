@@ -33,6 +33,19 @@ public sealed class ScenePolicyTests
     }
 
     [Fact]
+    public void OrdinaryVisualCutDoesNotRequireExtremeDifferenceScores()
+    {
+        var boundaries = ShotBoundaryPolicy.Detect(
+        [
+            new(TimeSpan.Zero, 0, 0, 0, false),
+            new(TimeSpan.FromSeconds(1), 0.32m, 0.32m, 0.32m, false),
+            new(TimeSpan.FromSeconds(2), 0.1m, 0.1m, 0.1m, false),
+        ]);
+
+        Assert.Equal([TimeSpan.FromSeconds(1)], boundaries);
+    }
+
+    [Fact]
     public void SceneIntervalsCapDurationWhenCutDetectionMissesTransitions()
     {
         var scenes = SceneIntervalBuilder.Build(

@@ -96,6 +96,68 @@ public sealed class CreatorPreparationWorkflowTests
         }
     }
 
+    [Fact]
+    public async Task EffectivelySilentSourceSkipsWhisperAndCreatesNoPhantomDialogue()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ADFi.Tests", Guid.NewGuid().ToString("N"));
+        var sourcePath = Path.Combine(root, "silent-source.mp4");
+        var projectId = Guid.NewGuid();
+        var projectDirectory = Path.Combine(root, projectId.ToString("D"));
+        var workerPath = Path.Combine(root, "worker.py");
+        Directory.CreateDirectory(root);
+        await File.WriteAllTextAsync(workerPath, "# unused", TestContext.Current.CancellationToken);
+
+        try
+        {
+            await GenerateSilentFixtureAsync(sourcePath);
+            var intake = await new SourceIntakeService(new FfprobeMediaProbe(), TimeProvider.System)
+                .ValidateAsync(
+                    sourcePath,
+                    projectDirectory,
+                    Guid.NewGuid(),
+                    projectId,
+                    true,
+                    TestContext.Current.CancellationToken);
+            var checkpointStore = new FilePipelineCheckpointStore(root);
+            await checkpointStore.SaveAsync(intake.Checkpoint, TestContext.Current.CancellationToken);
+            var runtimeCreations = 0;
+            var workflow = new CreatorPreparationWorkflow(
+                checkpointStore,
+                TimeProvider.System,
+                () =>
+                {
+                    runtimeCreations++;
+                    return new FixtureWhisperRuntime();
+                });
+
+            var result = await workflow.RunAsync(
+                projectId,
+                projectDirectory,
+                new(
+                    "ffmpeg",
+                    new(Environment.ProcessPath!, workerPath, Path.Combine(root, "models")),
+                    "tiny",
+                    320,
+                    3),
+                null,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, runtimeCreations);
+            Assert.Empty(result.AudioAnalysis.Transcript);
+            Assert.Equal(
+                CreatorPreparationWorkflow.CurrentAudioAnalysisVersion,
+                result.AudioAnalysis.AlgorithmVersion);
+            Assert.Contains(
+                result.AudioAnalysis.NarrationWindows,
+                window => window.Start < TimeSpan.FromSeconds(1)
+                          && window.End > TimeSpan.FromSeconds(1));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static async Task GenerateFixtureAsync(string path)
     {
         var startInfo = new ProcessStartInfo("ffmpeg")
@@ -117,6 +179,33 @@ public sealed class CreatorPreparationWorkflowTests
 
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("FFmpeg could not create the preparation fixture.");
+        var error = await process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        Assert.True(process.ExitCode == 0, error);
+    }
+
+    private static async Task GenerateSilentFixtureAsync(string path)
+    {
+        var startInfo = new ProcessStartInfo("ffmpeg")
+        {
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in new[]
+                 {
+                     "-hide_banner", "-loglevel", "error", "-y",
+                     "-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=1.2",
+                     "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+                     "-t", "1.2", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                     "-c:a", "aac", "-shortest", path,
+                 })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("FFmpeg could not create the silent preparation fixture.");
         var error = await process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
         await process.WaitForExitAsync(TestContext.Current.CancellationToken);
         Assert.True(process.ExitCode == 0, error);

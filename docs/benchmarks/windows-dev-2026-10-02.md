@@ -65,9 +65,9 @@ the three source-audio conditions needed by the walkthrough:
 
 | Source condition | Duration | Transcript segments | Scenes | AD segments | Final size |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Dialogue, music and effects — *Cosmos Laundromat* | 12:10.56 | 81 | 55 | 3 | 532,302,993 bytes |
-| Music and effects, no intelligible dialogue — *Big Buck Bunny* | 10:34.62 | 5 | 59 | 4 | 273,449,516 bytes |
-| Fully silent — *A Trip to the Moon* | 12:41.52 | 27 silence chunks | 52 | 51 | 39,541,738 bytes |
+| Dialogue, music and effects — *Cosmos Laundromat* | 12:10.56 | 72 | 197 | 36 | 532,379,413 bytes |
+| Music and effects, no intelligible dialogue — *Big Buck Bunny* | 10:34.62 | 5 | 183 | 42 | 273,450,190 bytes |
+| Fully silent — *A Trip to the Moon* | 12:41.52 | 0; Whisper skipped | 70 | 57 | 43,651,467 bytes |
 
 All three original hashes remained unchanged. All three final MP4 hashes match their finalization
 manifests, and complete FFmpeg decode checks succeeded. These runs were intentionally resumable and
@@ -75,10 +75,12 @@ included defect-fix restarts, so the latest per-stage durations contain checkpoi
 must not be presented as cold performance benchmarks. The diagnostic reports retain every measured
 attempt under `D:\ADFi-DemoRuns\Projects`.
 
-The results do not by themselves establish narration editorial quality. Cosmos completed without a
-warning override; Big Buck Bunny retained one possible-click warning outside the selected demo
-excerpt; and the silent film retained low-confidence, duplicate-description and possible-click
-warnings that require a complete human pass before publication. Exact output paths, hashes and the
-corrected implementation behavior are documented in
+The corrected outputs use `adfi-final-render-v2-audible-narration`, with first cues at 7.500,
+1.923 and 2.000 seconds respectively. Every timing overrun received an explicit evidence-grounded
+wording review. In addition to complete decode and bundle-hash checks, narration was measured and
+recognized from audio re-extracted from each final MP4. This specifically guards against validating
+standalone Piper WAV files while accidentally omitting them from the muxed result. The results do
+not by themselves establish final editorial quality; a complete human viewing/listening pass is
+still required before publication. Exact output paths, hashes and corrected behavior are in
 [Licensed real-media diagnostics](../REAL-MEDIA-DIAGNOSTICS.md). Walkthrough excerpts and stills are
 indexed separately at `D:\ADFi-DemoAssets\asset-manifest.json`.

@@ -19,7 +19,8 @@ public sealed record AudioAnalysisCompletionManifest(
     IReadOnlyList<TranscriptSegment> Transcript,
     IReadOnlyList<SourceAudioInterval> SourceAudioTimeline,
     IReadOnlyList<MediaInterval> NarrationWindows,
-    DateTimeOffset CompletedAtUtc);
+    DateTimeOffset CompletedAtUtc,
+    string? AlgorithmVersion = null);
 
 public sealed record CreatorPreparationResult(
     AudioAnalysisCompletionManifest AudioAnalysis,
@@ -41,6 +42,8 @@ public sealed class CreatorPreparationWorkflow(
     TimeProvider timeProvider,
     Func<IWhisperRuntime> whisperRuntimeFactory)
 {
+    public const string CurrentAudioAnalysisVersion = "1.3.0-low-information-transcript-filter";
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
@@ -223,34 +226,70 @@ public sealed class CreatorPreparationWorkflow(
     {
         public AdficationPhase Phase => AdficationPhase.AudioCharacterizationAndDialogueSegmentation;
 
-        public Task<bool> VerifyCheckpointAsync(
+        public async Task<bool> VerifyCheckpointAsync(
             PipelineCheckpoint checkpoint,
-            CancellationToken cancellationToken) =>
-            VerifyManifestAsync(
+            CancellationToken cancellationToken)
+        {
+            if (!await VerifyManifestAsync(
                 checkpoint,
                 projectDirectory,
                 "manifests/audio-analysis-complete.json",
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+
+            try
+            {
+                var manifest = await LoadAsync<AudioAnalysisCompletionManifest>(
+                    Path.Combine(projectDirectory, "manifests", "audio-analysis-complete.json"),
+                    cancellationToken).ConfigureAwait(false);
+                return string.Equals(
+                    manifest.AlgorithmVersion,
+                    CurrentAudioAnalysisVersion,
+                    StringComparison.Ordinal);
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
 
         public async Task<PipelineCheckpoint> ExecuteAsync(Guid projectId, CancellationToken cancellationToken)
         {
             var audio = await LoadOrPrepareAudioAsync(cancellationToken).ConfigureAwait(false);
-            await using var runtime = runtimeFactory();
-            var transcriptionProgress = new InlineProgress<TranscriptionProgress>(item => progress?.Report(new(
-                Phase,
-                item.CompletedChunks,
-                item.TotalChunks,
-                item.Announcement)));
-            var transcript = await new SequentialTranscriptionService(
-                    runtime,
-                    timeProvider,
-                    transcriptionProgress)
-                .TranscribeAsync(
-                    audio,
-                    projectDirectory,
-                    configuration.WhisperModel,
-                    source.Source.Probe.Duration,
-                    cancellationToken).ConfigureAwait(false);
+            IReadOnlyList<TranscriptSegment> transcript;
+            if (AudioSilencePolicy.IsEffectivelySilent(audio.Characterization))
+            {
+                // Whisper commonly hallucinates short repeated words when fed digital silence.
+                // Treat a deterministically measured inaudible stream as transcript-free and do
+                // not load Whisper at all. The original stream remains untouched for rendering.
+                transcript = [];
+                progress?.Report(new(
+                    Phase,
+                    audio.Chunks.Count,
+                    audio.Chunks.Count,
+                    "Source audio is effectively silent; dialogue transcription was skipped."));
+            }
+            else
+            {
+                await using var runtime = runtimeFactory();
+                var transcriptionProgress = new InlineProgress<TranscriptionProgress>(item => progress?.Report(new(
+                    Phase,
+                    item.CompletedChunks,
+                    item.TotalChunks,
+                    item.Announcement)));
+                transcript = await new SequentialTranscriptionService(
+                        runtime,
+                        timeProvider,
+                        transcriptionProgress)
+                    .TranscribeAsync(
+                        audio,
+                        projectDirectory,
+                        configuration.WhisperModel,
+                        source.Source.Probe.Duration,
+                        cancellationToken).ConfigureAwait(false);
+            }
             var sourceAudio = AudioTimelineComposer.Combine(
                 source.Source.Probe.Duration,
                 audio.Characterization.InitialAudioTimeline,
@@ -269,7 +308,8 @@ public sealed class CreatorPreparationWorkflow(
                 transcript,
                 sourceAudio,
                 narrationWindows,
-                timeProvider.GetUtcNow());
+                timeProvider.GetUtcNow(),
+                CurrentAudioAnalysisVersion);
             const string relative = "manifests/audio-analysis-complete.json";
             var absolute = Path.Combine(projectDirectory, relative.Replace('/', Path.DirectorySeparatorChar));
             await WriteAsync(absolute, completion, cancellationToken).ConfigureAwait(false);
@@ -296,6 +336,10 @@ public sealed class CreatorPreparationWorkflow(
                                               existing.SourceSha256,
                                               source.Source.SourceSha256,
                                               StringComparison.OrdinalIgnoreCase)
+                                          && string.Equals(
+                                              existing.AlgorithmVersion,
+                                              AudioPreparationService.CurrentAlgorithmVersion,
+                                              StringComparison.Ordinal)
                                           && File.Exists(Path.Combine(
                                               projectDirectory,
                                               existing.AnalysisAudioRelativePath.Replace('/', Path.DirectorySeparatorChar)))
@@ -329,18 +373,42 @@ public sealed class CreatorPreparationWorkflow(
     {
         public AdficationPhase Phase => AdficationPhase.VisualSegmentationAndKeyframes;
 
-        public Task<bool> VerifyCheckpointAsync(
+        public async Task<bool> VerifyCheckpointAsync(
             PipelineCheckpoint checkpoint,
-            CancellationToken cancellationToken) =>
-            VerifyManifestAsync(
+            CancellationToken cancellationToken)
+        {
+            if (!await VerifyManifestAsync(
                 checkpoint,
                 projectDirectory,
                 "manifests/visual-index.json",
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+
+            try
+            {
+                var manifest = await LoadAsync<VisualIndexManifest>(
+                    Path.Combine(projectDirectory, "manifests", "visual-index.json"),
+                    cancellationToken).ConfigureAwait(false);
+                var audioHash = await HashAsync(
+                    Path.Combine(projectDirectory, "manifests", "audio-analysis-complete.json"),
+                    cancellationToken).ConfigureAwait(false);
+                return string.Equals(manifest.AlgorithmVersion, VisualIndexService.CurrentAlgorithmVersion, StringComparison.Ordinal)
+                       && string.Equals(manifest.AudioAnalysisSha256, audioHash, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
 
         public async Task<PipelineCheckpoint> ExecuteAsync(Guid projectId, CancellationToken cancellationToken)
         {
             var audio = await LoadAsync<AudioAnalysisCompletionManifest>(
+                Path.Combine(projectDirectory, "manifests", "audio-analysis-complete.json"),
+                cancellationToken).ConfigureAwait(false);
+            var audioHash = await HashAsync(
                 Path.Combine(projectDirectory, "manifests", "audio-analysis-complete.json"),
                 cancellationToken).ConfigureAwait(false);
             progress?.Report(new(Phase, 0, 1, "Building bounded scene index and keyframe sequences."));
@@ -352,6 +420,7 @@ public sealed class CreatorPreparationWorkflow(
                 configuration.MaximumFramesPerScene,
                 audio.Transcript,
                 audio.NarrationWindows,
+                audioHash,
                 cancellationToken).ConfigureAwait(false);
             const string relative = "manifests/visual-index.json";
             var absolute = Path.Combine(projectDirectory, relative.Replace('/', Path.DirectorySeparatorChar));

@@ -18,12 +18,27 @@ public sealed record AudioPreparationManifest(
     string AnalysisAudioRelativePath,
     AudioCharacterization Characterization,
     IReadOnlyList<AudioChunk> Chunks,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    string? AlgorithmVersion = null);
+
+public static class AudioSilencePolicy
+{
+    public const decimal EffectiveSilencePeakThresholdDb = -70m;
+
+    public static bool IsEffectivelySilent(AudioCharacterization characterization) =>
+        characterization.PeakVolumeDb is { } peak
+            ? peak <= EffectiveSilencePeakThresholdDb
+            : characterization.MeanVolumeDb is null
+              && characterization.InitialAudioTimeline.Count > 0
+              && characterization.InitialAudioTimeline.All(
+                  interval => interval.Kind == SourceAudioKind.QuietCandidate);
+}
 
 public sealed partial class AudioPreparationService(
     string ffmpegPath,
     TimeProvider timeProvider)
 {
+    public const string CurrentAlgorithmVersion = "1.1.0-measure-before-normalization";
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     public async Task<AudioPreparationManifest> PrepareAsync(
@@ -39,40 +54,20 @@ public sealed partial class AudioPreparationService(
         var chunksDirectory = Path.Combine(audioDirectory, "chunks");
         Directory.CreateDirectory(chunksDirectory);
         var analysisAudioPath = Path.Combine(audioDirectory, "analysis-mono-16k.wav");
+        var rawAnalysisAudioPath = Path.Combine(audioDirectory, "analysis-mono-16k-raw.wav");
 
         await RunRequiredAsync(
             [
                 "-hide_banner", "-loglevel", "error", "-y", "-i", sourcePath,
                 "-vn", "-ac", "1", "-ar", "16000",
-                "-af", "loudnorm=I=-23:TP=-2:LRA=7",
-                "-c:a", "pcm_s16le", analysisAudioPath,
+                "-c:a", "pcm_s16le", rawAnalysisAudioPath,
             ],
             "AUDIO_EXTRACTION_FAILED",
             cancellationToken).ConfigureAwait(false);
 
-        var volumeTask = MeasureVolumeAsync(analysisAudioPath, cancellationToken);
-        var silenceTask = DetectSilenceAsync(analysisAudioPath, source.Probe.Duration, cancellationToken);
+        var volumeTask = MeasureVolumeAsync(rawAnalysisAudioPath, cancellationToken);
+        var silenceTask = DetectSilenceAsync(rawAnalysisAudioPath, source.Probe.Duration, cancellationToken);
         await Task.WhenAll(volumeTask, silenceTask).ConfigureAwait(false);
-
-        var chunks = AudioChunkPlanner.Plan(
-            source.Probe.Duration,
-            TimeSpan.FromSeconds(30),
-            TimeSpan.FromSeconds(1));
-        foreach (var chunk in chunks)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var outputPath = Path.Combine(root, chunk.RelativeAudioPath.Replace('/', Path.DirectorySeparatorChar));
-            await RunRequiredAsync(
-                [
-                    "-hide_banner", "-loglevel", "error", "-y",
-                    "-ss", FormatTime(chunk.SourceInterval.Start),
-                    "-i", analysisAudioPath,
-                    "-t", FormatTime(chunk.SourceInterval.Duration),
-                    "-c:a", "pcm_s16le", outputPath,
-                ],
-                "AUDIO_CHUNK_FAILED",
-                cancellationToken).ConfigureAwait(false);
-        }
 
         var volume = await volumeTask.ConfigureAwait(false);
         var characterization = new AudioCharacterization(
@@ -81,18 +76,68 @@ public sealed partial class AudioPreparationService(
             volume.Mean,
             volume.Peak,
             await silenceTask.ConfigureAwait(false));
-        var manifest = new AudioPreparationManifest(
-            projectId,
-            source.SourceSha256,
-            "audio/analysis-mono-16k.wav",
-            characterization,
-            chunks,
-            timeProvider.GetUtcNow());
-        await WriteManifestAsync(
-            Path.Combine(root, "manifests", "audio-prepared.json"),
-            manifest,
-            cancellationToken).ConfigureAwait(false);
-        return manifest;
+        try
+        {
+            if (AudioSilencePolicy.IsEffectivelySilent(characterization))
+            {
+                // Never normalize digital silence: some FFmpeg/loudnorm versions can turn an
+                // all-zero stream into full-scale analysis audio, which then causes Whisper
+                // hallucinations. Preserve the quiet analysis waveform instead.
+                File.Move(rawAnalysisAudioPath, analysisAudioPath, overwrite: true);
+            }
+            else
+            {
+                await RunRequiredAsync(
+                    [
+                        "-hide_banner", "-loglevel", "error", "-y", "-i", rawAnalysisAudioPath,
+                        "-af", "loudnorm=I=-23:TP=-2:LRA=7",
+                        "-c:a", "pcm_s16le", analysisAudioPath,
+                    ],
+                    "AUDIO_NORMALIZATION_FAILED",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            var chunks = AudioChunkPlanner.Plan(
+                source.Probe.Duration,
+                TimeSpan.FromSeconds(30),
+                TimeSpan.FromSeconds(1));
+            foreach (var chunk in chunks)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var outputPath = Path.Combine(root, chunk.RelativeAudioPath.Replace('/', Path.DirectorySeparatorChar));
+                await RunRequiredAsync(
+                    [
+                        "-hide_banner", "-loglevel", "error", "-y",
+                        "-ss", FormatTime(chunk.SourceInterval.Start),
+                        "-i", analysisAudioPath,
+                        "-t", FormatTime(chunk.SourceInterval.Duration),
+                        "-c:a", "pcm_s16le", outputPath,
+                    ],
+                    "AUDIO_CHUNK_FAILED",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            var manifest = new AudioPreparationManifest(
+                projectId,
+                source.SourceSha256,
+                "audio/analysis-mono-16k.wav",
+                characterization,
+                chunks,
+                timeProvider.GetUtcNow(),
+                CurrentAlgorithmVersion);
+            await WriteManifestAsync(
+                Path.Combine(root, "manifests", "audio-prepared.json"),
+                manifest,
+                cancellationToken).ConfigureAwait(false);
+            return manifest;
+        }
+        finally
+        {
+            if (File.Exists(rawAnalysisAudioPath))
+            {
+                File.Delete(rawAnalysisAudioPath);
+            }
+        }
     }
 
     private async Task<(decimal? Mean, decimal? Peak)> MeasureVolumeAsync(
@@ -218,4 +263,3 @@ public sealed partial class AudioPreparationService(
     [GeneratedRegex(@"silence_end:\s*([0-9]+(?:\.[0-9]+)?)", RegexOptions.CultureInvariant)]
     private static partial Regex SilenceEndRegex();
 }
-

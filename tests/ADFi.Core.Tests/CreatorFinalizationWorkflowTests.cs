@@ -57,6 +57,28 @@ public sealed class CreatorFinalizationWorkflowTests
     }
 
     [Fact]
+    public async Task ChangedRenderProfileProducesANewBundleInsteadOfReusingBrokenMedia()
+    {
+        using var fixture = await FinalizationFixture.CreateAsync();
+        var request = new CreatorFinalizationRequest(fixture.ProjectId, fixture.ProjectDirectory);
+        var first = await fixture.CreateWorkflow().RunAsync(
+            request,
+            null,
+            TestContext.Current.CancellationToken);
+
+        fixture.Renderer.ProfileVersion = "adfi-final-render-v2-test";
+        var rebuilt = await fixture.CreateWorkflow().RunAsync(
+            request,
+            null,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(rebuilt.ReusedVerifiedBundle);
+        Assert.Equal(2, fixture.Renderer.CallCount);
+        Assert.NotEqual(first.FinalVideoPath, rebuilt.FinalVideoPath);
+        Assert.Equal(fixture.Renderer.ProfileVersion, rebuilt.Manifest.RenderProfileVersion);
+    }
+
+    [Fact]
     public async Task EquivalentValidationRerunDoesNotDuplicateFinalMedia()
     {
         using var fixture = await FinalizationFixture.CreateAsync();
@@ -350,6 +372,8 @@ public sealed class CreatorFinalizationWorkflowTests
     {
         public int CallCount { get; private set; }
         public bool ThrowAfterWriting { get; set; }
+        public string ProfileVersion { get; set; } = "adfi-final-render-v1-test";
+        public string RenderProfileVersion => ProfileVersion;
 
         public async Task<FinalRenderResult> RenderAsync(
             FinalRenderRequest request,

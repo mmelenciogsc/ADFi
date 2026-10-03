@@ -98,12 +98,25 @@ public sealed class NarrationAutoFitCoordinator(
                     RewriteSchema,
                     350),
                 cancellationToken).ConfigureAwait(false);
-            var rewrite = JsonSerializer.Deserialize<RewriteResponse>(response.Content, JsonOptions)
-                          ?? throw new InvalidDataException("Auto-fit returned no rewrite.");
-            ArgumentException.ThrowIfNullOrWhiteSpace(rewrite.Text);
-            if (!segment.EvidenceIds.ToHashSet(StringComparer.Ordinal).SetEquals(rewrite.EvidenceIds))
+            RewriteResponse? rewrite;
+            try
             {
-                throw new InvalidDataException("Auto-fit changed the segment's required evidence set.");
+                rewrite = JsonSerializer.Deserialize<RewriteResponse>(response.Content, JsonOptions);
+            }
+            catch (JsonException)
+            {
+                return currentText;
+            }
+
+            if (rewrite is null
+                || string.IsNullOrWhiteSpace(rewrite.Text)
+                || rewrite.EvidenceIds is null
+                || !segment.EvidenceIds.ToHashSet(StringComparer.Ordinal).SetEquals(rewrite.EvidenceIds))
+            {
+                // An invalid model rewrite is never accepted. Retaining the last verified text lets
+                // the finite timing loop finish and surfaces a required human review instead of
+                // aborting the entire resumable project.
+                return currentText;
             }
 
             if (rewrite.Text.Length >= currentText.Length)

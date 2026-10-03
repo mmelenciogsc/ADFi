@@ -163,8 +163,30 @@ public sealed class CreatorVisualUnderstandingWorkflow(
     {
         public AdficationPhase Phase => AdficationPhase.RecurringPersonContinuityAndCharacterGraph;
 
-        public Task<bool> VerifyCheckpointAsync(PipelineCheckpoint checkpoint, CancellationToken cancellationToken) =>
-            VerifyAsync(checkpoint, root, "manifests/face-continuity.json", cancellationToken);
+        public async Task<bool> VerifyCheckpointAsync(PipelineCheckpoint checkpoint, CancellationToken cancellationToken)
+        {
+            const string relative = "manifests/face-continuity.json";
+            if (!await VerifyAsync(checkpoint, root, relative, cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+
+            try
+            {
+                var faceManifest = await LoadAsync<FaceContinuityManifest>(
+                    Path.Combine(root, relative), cancellationToken).ConfigureAwait(false);
+                var visualIndexSha256 = await HashAsync(
+                    Path.Combine(root, "manifests", "visual-index.json"), cancellationToken).ConfigureAwait(false);
+                return string.Equals(
+                    faceManifest.VisualIndexSha256,
+                    visualIndexSha256,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception exception) when (exception is JsonException or IOException or InvalidDataException)
+            {
+                return false;
+            }
+        }
 
         public async Task<PipelineCheckpoint> ExecuteAsync(Guid projectId, CancellationToken cancellationToken)
         {
@@ -173,6 +195,8 @@ public sealed class CreatorVisualUnderstandingWorkflow(
             await new FaceContinuityIndexService(analyzerFactory, timeProvider, faceProgress).BuildAsync(
                 projectId,
                 source.Source.SourceSha256,
+                await HashAsync(
+                    Path.Combine(root, "manifests", "visual-index.json"), cancellationToken).ConfigureAwait(false),
                 visual,
                 root,
                 cancellationToken).ConfigureAwait(false);

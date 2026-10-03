@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text.RegularExpressions;
 using ADFi.Core;
 using ADFi.Media;
 using ADFi.Infrastructure;
@@ -7,6 +9,47 @@ namespace ADFi.Core.Tests;
 
 public sealed class PhaseZeroIntegrationTests
 {
+    [Fact]
+    public async Task FinalRenderPreservesAudibleNarrationWhenTheSourceTrackIsSilent()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var testRoot = Path.Combine(Path.GetTempPath(), "ADFi.RenderTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(testRoot);
+        try
+        {
+            var sourcePath = Path.Combine(testRoot, "silent-source.mp4");
+            var narrationPath = Path.Combine(testRoot, "narration.wav");
+            var outputPath = Path.Combine(testRoot, "audible-narration.mp4");
+            await GenerateSilentFixtureAsync(sourcePath);
+            await GenerateNarrationFixtureAsync(narrationPath);
+            var probe = await new FfprobeMediaProbe().ProbeAsync(sourcePath, cancellationToken);
+            var renderer = new FinalRenderService("ffmpeg", new FfprobeMediaProbe());
+
+            _ = await renderer.RenderAsync(
+                new(
+                    sourcePath,
+                    probe,
+                    [new(
+                        "ad-audibility",
+                        narrationPath,
+                        new(TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(800)),
+                        TimeSpan.FromMilliseconds(250))],
+                    outputPath),
+                cancellationToken);
+
+            var cuePeakDb = await MeasurePeakDbAsync(
+                outputPath,
+                TimeSpan.Zero,
+                probe.Duration);
+            Assert.True(cuePeakDb > -30, $"Expected audible narration, but measured {cuePeakDb:0.0} dBFS.");
+            Assert.Equal(FinalRenderService.CurrentRenderProfileVersion, renderer.RenderProfileVersion);
+        }
+        finally
+        {
+            Directory.Delete(testRoot, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task LocalVideoBecomesAnImmutableValidatedSourceManifest()
     {
@@ -73,6 +116,7 @@ public sealed class PhaseZeroIntegrationTests
                 maximumFramesPerScene: 3,
                 transcript: [],
                 narrationWindows: [new(TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(900))],
+                audioAnalysisSha256: new string('A', 64),
                 cancellationToken);
             var indexedScene = Assert.Single(visualIndex.Scenes);
             Assert.NotEmpty(indexedScene.Keyframes);
@@ -202,6 +246,70 @@ public sealed class PhaseZeroIntegrationTests
         var error = await process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         Assert.True(process.ExitCode == 0, error);
+    }
+
+    private static async Task GenerateSilentFixtureAsync(string path)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "ffmpeg",
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in new[]
+                 {
+                     "-hide_banner", "-loglevel", "error", "-y",
+                     "-f", "lavfi", "-i", "color=c=black:s=320x240:d=1",
+                     "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                     "-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", path,
+                 })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("FFmpeg could not generate the silent integration fixture.");
+        var error = await process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        Assert.True(process.ExitCode == 0, error);
+    }
+
+    private static async Task<double> MeasurePeakDbAsync(
+        string path,
+        TimeSpan start,
+        TimeSpan duration)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "ffmpeg",
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in new[]
+                 {
+                     "-hide_banner", "-i", path,
+                     "-ss", start.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture),
+                     "-t", duration.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture),
+                     "-map", "0:a:0", "-af", "volumedetect", "-f", "null", "-",
+                 })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("FFmpeg could not audit rendered narration.");
+        var error = await process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+        _ = await process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        Assert.True(process.ExitCode == 0, error);
+        var match = Regex.Match(error, @"max_volume:\s*(?<value>-?(?:\d+(?:\.\d+)?|inf))\s*dB", RegexOptions.IgnoreCase);
+        Assert.True(match.Success, error);
+        return string.Equals(match.Groups["value"].Value, "-inf", StringComparison.OrdinalIgnoreCase)
+            ? double.NegativeInfinity
+            : double.Parse(match.Groups["value"].Value, CultureInfo.InvariantCulture);
     }
 
     private static async Task GenerateNarrationFixtureAsync(string path)

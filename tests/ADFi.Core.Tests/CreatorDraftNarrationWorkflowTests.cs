@@ -21,6 +21,8 @@ public sealed class CreatorDraftNarrationWorkflowTests
         var frameTime = TimeSpan.FromSeconds(1);
         var frame = new KeyframeEvidence(
             "frame-1", frameTime, "visual/frames/frame.jpg", 640, 360, 0, 0, false);
+        var laterFrame = new KeyframeEvidence(
+            "frame-2", TimeSpan.FromSeconds(4), "visual/frames/frame-2.jpg", 640, 360, 0, 0, false);
         var source = new SourceIntakeResult(
             new(
                 Path.Combine(workspace, "source.mp4"),
@@ -66,7 +68,7 @@ public sealed class CreatorDraftNarrationWorkflowTests
             TimeSpan.FromSeconds(1),
             640,
             3,
-            [new("scene-00000", sceneInterval, [frame], [], ["narration-window-00000"])],
+            [new("scene-00000", sceneInterval, [frame, laterFrame], [], ["narration-window-00000"])],
             DateTimeOffset.UnixEpoch);
         var faces = new FaceContinuityManifest(
             projectId, sourceHash, [], [], [], DateTimeOffset.UnixEpoch);
@@ -81,6 +83,14 @@ public sealed class CreatorDraftNarrationWorkflowTests
                             "observation-1",
                             "action",
                             "A woman places a key on the table.",
+                            ["frame-1", "frame-2"],
+                            0.95m,
+                            0.9m,
+                            false),
+                        new(
+                            "observation-unsupported-title",
+                            "text",
+                            "The title 'Later Scene' appears.",
                             ["frame-1"],
                             0.95m,
                             0.9m,
@@ -102,7 +112,7 @@ public sealed class CreatorDraftNarrationWorkflowTests
 
         var responses = new Queue<string>(
         [
-            "{\"text\":\"A woman places a key on the table.\",\"evidenceIds\":[\"frame-1\"],\"uncertainty\":null,\"reason\":\"The silent action changes the scene.\"}",
+            "{\"text\":\"A woman places a key on the table.\",\"evidenceIds\":[\"frame-1\",\"frame-2\"],\"uncertainty\":null,\"reason\":\"The silent action changes the scene.\"}",
         ]);
         var runtimeCreations = 0;
         var synthesisCount = 0;
@@ -130,7 +140,8 @@ public sealed class CreatorDraftNarrationWorkflowTests
                 projectId, project, configuration, null, TestContext.Current.CancellationToken);
 
             var opportunity = Assert.Single(first.Opportunities.Opportunities);
-            Assert.True(opportunity.Window.Start >= frameTime);
+            Assert.Equal(frameTime, opportunity.Window.Start);
+            Assert.DoesNotContain("Later Scene", opportunity.Reason, StringComparison.Ordinal);
             var narration = Assert.Single(first.Narration.Segments);
             Assert.True(narration.Fit.Fits);
             Assert.False(narration.RequiresUserReview);

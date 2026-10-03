@@ -178,7 +178,12 @@ internal static class Program
                         cancellationToken),
                     cancellationToken)
                 .ConfigureAwait(false);
-            await PersistInitialDraftAsync(projectStore, projectId, drafted, cancellationToken).ConfigureAwait(false);
+            await PersistInitialDraftAsync(
+                projectStore,
+                projectId,
+                drafted,
+                options.AcceptGeneratedRedraft,
+                cancellationToken).ConfigureAwait(false);
             var snapshot = await projectStore.LoadCurrentAsync(projectId, cancellationToken).ConfigureAwait(false);
             if (!string.IsNullOrWhiteSpace(options.ApprovedReviewText)
                 || !string.IsNullOrWhiteSpace(options.ApprovedReviewFile))
@@ -352,6 +357,7 @@ internal static class Program
             FileProjectVersionStore projectStore,
             Guid projectId,
             CreatorDraftNarrationResult result,
+            bool acceptGeneratedRedraft,
             CancellationToken cancellationToken)
         {
             var current = await projectStore.LoadCurrentAsync(projectId, cancellationToken).ConfigureAwait(false);
@@ -372,8 +378,11 @@ internal static class Program
                         return;
                     }
 
-                    throw new InvalidOperationException(
-                        "The resumed diagnostic project contains reviewed state whose generated evidence or timing changed; it will not be overwritten.");
+                    if (!acceptGeneratedRedraft)
+                    {
+                        throw new InvalidOperationException(
+                            "The resumed diagnostic project contains reviewed state whose generated evidence or timing changed; pass --accept-generated-redraft only after explicitly approving replacement of that diagnostic draft.");
+                    }
                 }
             }
 
@@ -398,7 +407,9 @@ internal static class Program
                         : ProjectMutationKind.RegenerateNarration,
                     current.AdSegments.Count == 0
                         ? "Generated the initial real-media diagnostic draft and measured narration."
-                        : "Regenerated the unreviewed diagnostic draft after pipeline inputs changed.",
+                        : current.AdSegments.Any(item => item.UserApproved)
+                            ? "Explicitly accepted a regenerated diagnostic draft after narration policy inputs changed."
+                            : "Regenerated the unreviewed diagnostic draft after pipeline inputs changed.",
                     now),
                 current.Version,
                 cancellationToken).ConfigureAwait(false);
@@ -614,17 +625,25 @@ internal static class Program
         string VoiceId,
         string? ApprovedReviewText,
         string? ApprovedReviewFile,
+        bool AcceptGeneratedRedraft,
         Guid DiagnosticUserId)
     {
         public static DiagnosticOptions Parse(string[] args)
         {
             var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var rightsConfirmed = false;
+            var acceptGeneratedRedraft = false;
             for (var index = 0; index < args.Length; index++)
             {
                 if (args[index] == "--rights-confirmed")
                 {
                     rightsConfirmed = true;
+                    continue;
+                }
+
+                if (args[index] == "--accept-generated-redraft")
+                {
+                    acceptGeneratedRedraft = true;
                     continue;
                 }
 
@@ -678,6 +697,7 @@ internal static class Program
                 values.TryGetValue("--approved-review-file", out var reviewFile)
                     ? Path.GetFullPath(reviewFile)
                     : null,
+                acceptGeneratedRedraft,
                 Guid.Parse(values.GetValueOrDefault("--diagnostic-user-id", "00000000-0000-0000-0000-000000000001")));
         }
 

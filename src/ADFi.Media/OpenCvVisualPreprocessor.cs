@@ -136,7 +136,13 @@ public sealed class OpenCvVisualPreprocessor
         using var edges = new Mat();
         Cv2.Canny(gray, edges, 100, 200);
         var density = Cv2.CountNonZero(edges) / (decimal)(edges.Rows * edges.Cols);
-        return density is >= 0.03m and <= 0.35m;
+        var meanLuminance = (decimal)Cv2.Mean(gray).Val0;
+        // Sparse title cards can occupy well under three percent of an otherwise black frame.
+        // A higher floor caused opening titles to bypass OCR and left no trustworthy narration
+        // fact. Restrict the lower threshold to dark frames so low-detail natural imagery does not
+        // get routed through OCR. The VLM/OCR stages still decide whether edges are meaningful text.
+        return density <= 0.35m
+               && (density >= 0.03m || meanLuminance <= 40m && density >= 0.0025m);
     }
 
     private static decimal Clamp01(decimal value) => Math.Clamp(value, 0m, 1m);

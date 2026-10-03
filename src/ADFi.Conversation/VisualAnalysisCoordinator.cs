@@ -128,19 +128,43 @@ public sealed class VisualAnalysisCoordinator(
         Exception? validationFailure = null;
         for (var attempt = 0; attempt < 2; attempt++)
         {
-            var response = await runtime.GenerateAsync(
-                modelName,
-                new(
-                    prompt.Content,
-                    BuildInput(projectId, package, isRetry: attempt > 0),
-                    package.Scene.Keyframes.Select(frame => RequiredFramePath(package, frame.EvidenceId)).ToArray(),
-                    OutputSchema,
-                    attempt == 0 ? 1_500 : 2_400),
-                cancellationToken).ConfigureAwait(false);
+            var request = new LocalModelRequest(
+                prompt.Content,
+                BuildInput(projectId, package, isRetry: attempt > 0),
+                package.Scene.Keyframes.Select(frame => RequiredFramePath(package, frame.EvidenceId)).ToArray(),
+                OutputSchema,
+                attempt == 0 ? 1_500 : 2_400);
+            LocalModelResponse response;
+            try
+            {
+                response = await runtime.GenerateAsync(modelName, request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or HttpRequestException or IOException)
+            {
+                validationFailure = exception;
+                response = new("", modelName, TimeSpan.Zero);
+                await PersistRejectedOutputAsync(
+                    projectDirectory,
+                    package.Scene.SceneId,
+                    attempt + 1,
+                    response,
+                    exception,
+                    cancellationToken).ConfigureAwait(false);
+                if (attempt == 1)
+                {
+                    return (CreateUnavailableDraft(package.Scene.SceneId, "Visual model requests failed after one bounded retry."), response);
+                }
+
+                continue;
+            }
+
+            VisualAnalysisDraft? parsedDraft = null;
             try
             {
                 var draft = JsonSerializer.Deserialize<VisualAnalysisDraft>(response.Content, JsonOptions)
                             ?? throw new InvalidDataException("The visual analyst returned no scene result.");
+                parsedDraft = draft;
+                draft = NormalizeObservationScores(draft);
                 draft = NormalizeObservationEvidence(package, draft);
                 ValidateDraftEvidence(package, draft);
                 return (draft, response);
@@ -155,6 +179,35 @@ public sealed class VisualAnalysisCoordinator(
                     response,
                     exception,
                     cancellationToken).ConfigureAwait(false);
+
+                // A bounded retry can occasionally contain one useful, fully supported
+                // observation alongside another observation with a mistyped or invented
+                // evidence ID. Never repair or fuzzy-match that ID: after the final retry,
+                // retain only independently valid observations. This keeps every promoted
+                // fact grounded while preventing one bad low-value item from discarding an
+                // otherwise usable scene result and aborting a long resumable analysis.
+                if (attempt == 1 && parsedDraft is not null)
+                {
+                    var conservative = RemoveUnsupportedObservations(
+                        package,
+                        NormalizeObservationScores(parsedDraft));
+                    if (string.Equals(conservative.SceneId, package.Scene.SceneId, StringComparison.Ordinal))
+                    {
+                        conservative = NormalizeObservationEvidence(package, conservative);
+                        if (conservative.Observations.Length == 0)
+                        {
+                            conservative = conservative with
+                            {
+                                PotentialOnScreenText = [],
+                                RequiresAdditionalFrames = true,
+                                Uncertainty = "No evidence-valid visual observations remained after bounded model validation.",
+                            };
+                        }
+
+                        ValidateDraftEvidence(package, conservative);
+                        return (conservative, response);
+                    }
+                }
             }
         }
 
@@ -162,6 +215,9 @@ public sealed class VisualAnalysisCoordinator(
             "The visual analyst returned incomplete, malformed, or unsupported structured output after one bounded retry.",
             validationFailure);
     }
+
+    private static VisualAnalysisDraft CreateUnavailableDraft(string sceneId, string uncertainty) =>
+        new(sceneId, [], [], true, false, uncertainty);
 
     private async Task PersistRejectedOutputAsync(
         string projectDirectory,
@@ -304,8 +360,8 @@ public sealed class VisualAnalysisCoordinator(
                 package,
                 new(
                     existing.SceneId,
-                    existing.Observations,
-                    existing.PotentialOnScreenText,
+                    existing.Observations.ToArray(),
+                    existing.PotentialOnScreenText.ToArray(),
                     existing.RequiresAdditionalFrames,
                     existing.RequiresExactOcr,
                     existing.Uncertainty));
@@ -404,6 +460,47 @@ public sealed class VisualAnalysisCoordinator(
         return draft with { Observations = observations, PotentialOnScreenText = potentialText };
     }
 
+    private static VisualAnalysisDraft NormalizeObservationScores(VisualAnalysisDraft draft) =>
+        draft with
+        {
+            Observations = draft.Observations
+                .Select(observation => observation with
+                {
+                    // Certainty and importance are routing weights, not visual facts. Some
+                    // compact VLMs occasionally answer on a 0-3 or percentage-like scale
+                    // despite the JSON schema. Bound those weights deterministically; do
+                    // not alter the observation text or its evidence relationship.
+                    Certainty = Math.Clamp(observation.Certainty, 0m, 1m),
+                    Importance = Math.Clamp(observation.Importance, 0m, 1m),
+                })
+                .ToArray(),
+        };
+
+    private static VisualAnalysisDraft RemoveUnsupportedObservations(
+        VisualAnalysisPackage package,
+        VisualAnalysisDraft draft)
+    {
+        if (!string.Equals(draft.SceneId, package.Scene.SceneId, StringComparison.Ordinal))
+        {
+            return draft with { Observations = [] };
+        }
+
+        var frameEvidence = package.Scene.Keyframes
+            .Select(frame => frame.EvidenceId)
+            .ToHashSet(StringComparer.Ordinal);
+        var supported = draft.Observations
+            .Where(observation => !string.IsNullOrWhiteSpace(observation.ObservationId)
+                                  && !string.IsNullOrWhiteSpace(observation.Category)
+                                  && !string.IsNullOrWhiteSpace(observation.ObjectiveDescription))
+            .GroupBy(observation => observation.ObservationId, StringComparer.Ordinal)
+            .Where(group => group.Count() == 1)
+            .Select(group => group.Single())
+            .Where(observation => observation.EvidenceIds.Count > 0
+                                  && observation.EvidenceIds.All(frameEvidence.Contains))
+            .ToArray();
+        return draft with { Observations = supported };
+    }
+
     private static string RequiredFramePath(VisualAnalysisPackage package, string evidenceId) =>
         package.AbsoluteFramePaths.TryGetValue(evidenceId, out var path) && File.Exists(path)
             ? Path.GetFullPath(path)
@@ -431,8 +528,8 @@ public sealed class VisualAnalysisCoordinator(
 
     private sealed record VisualAnalysisDraft(
         string SceneId,
-        IReadOnlyList<VisualObservation> Observations,
-        IReadOnlyList<string> PotentialOnScreenText,
+        VisualObservation[] Observations,
+        string[] PotentialOnScreenText,
         bool RequiresAdditionalFrames,
         bool RequiresExactOcr,
         string? Uncertainty);

@@ -12,10 +12,14 @@ public sealed record VisualIndexManifest(
     int MaximumImageDimension,
     int MaximumFramesPerScene,
     IReadOnlyList<VisualScene> Scenes,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    string? AlgorithmVersion = null,
+    string? AudioAnalysisSha256 = null);
 
 public sealed class VisualIndexService(TimeProvider timeProvider)
 {
+    public const string CurrentAlgorithmVersion = "2.4.0-dark-sparse-title-detection";
+
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     public async Task<VisualIndexManifest> BuildAsync(
@@ -26,9 +30,11 @@ public sealed class VisualIndexService(TimeProvider timeProvider)
         int maximumFramesPerScene,
         IReadOnlyList<TranscriptSegment> transcript,
         IReadOnlyList<MediaInterval> narrationWindows,
+        string audioAnalysisSha256,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(source);
+        ArgumentException.ThrowIfNullOrWhiteSpace(audioAnalysisSha256);
         if (maximumFramesPerScene is < 1 or > 9)
         {
             throw new ArgumentOutOfRangeException(nameof(maximumFramesPerScene));
@@ -74,7 +80,9 @@ public sealed class VisualIndexService(TimeProvider timeProvider)
             maximumImageDimension,
             maximumFramesPerScene,
             scenes,
-            timeProvider.GetUtcNow());
+            timeProvider.GetUtcNow(),
+            CurrentAlgorithmVersion,
+            audioAnalysisSha256);
         await WriteManifestAsync(
             Path.Combine(root, "manifests", "visual-index.json"),
             manifest,
@@ -199,17 +207,7 @@ public sealed class VisualIndexService(TimeProvider timeProvider)
         IReadOnlyList<FrameCandidate> candidates,
         int maximumFrames)
     {
-        var planned = KeyframeSequencePlanner.SelectTimes(interval, maximumFrames);
-        var salient = candidates
-            .Where(candidate => candidate.SourceTime >= interval.Start && candidate.SourceTime < interval.End)
-            .OrderByDescending(candidate => candidate.PotentialText)
-            .ThenByDescending(candidate => candidate.MotionScore + candidate.StructuralDifference + candidate.ColorDifference)
-            .Select(candidate => candidate.SourceTime);
-        return planned.Concat(salient)
-            .Distinct()
-            .Order()
-            .Take(maximumFrames)
-            .ToArray();
+        return KeyframeSequencePlanner.SelectTimes(interval, maximumFrames, candidates).ToArray();
     }
 
     private static Mat ResizeBounded(Mat source, int maximumDimension)
